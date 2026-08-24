@@ -1,6 +1,6 @@
 module gozaq
 
-go 1.25.1
+go 1.25.0
 
 require (
 	github.com/brianvoe/gofakeit/v7 v7.16.0
