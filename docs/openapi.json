@@ -1,0 +1,958 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Gozaq Production Backend API",
+    "version": "1.0.0",
+    "description": "Production-grade Go Backend API documentation powered by Scalar, Clean Architecture, Redis Caching, RBAC, and Prometheus Observability."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080",
+      "description": "Local Development Server"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Enter your JWT Access Token obtained from /api/v1/auth/login or /api/v1/auth/refresh"
+      }
+    },
+    "schemas": {
+      "APIResponse": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "status_code": { "type": "integer", "example": 200 },
+          "error_code": { "type": "string", "example": "BAD_REQUEST" },
+          "message": { "type": "string", "example": "Operation completed successfully" },
+          "timestamp": { "type": "string", "format": "date-time", "example": "2026-08-24T12:00:00.000Z" },
+          "data": { "type": "object", "nullable": true },
+          "errors": { "type": "object", "nullable": true }
+        },
+        "required": ["success", "status_code", "message", "timestamp"]
+      },
+      "RegisterRequest": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "example": "Zaq Doe", "minLength": 2, "maxLength": 100 },
+          "email": { "type": "string", "format": "email", "example": "zaq@example.com" },
+          "password": { "type": "string", "format": "password", "example": "SecureP@ss123", "minLength": 6 },
+          "role": { "type": "string", "enum": ["user", "admin"], "example": "user" }
+        },
+        "required": ["name", "email", "password"]
+      },
+      "LoginRequest": {
+        "type": "object",
+        "properties": {
+          "email": { "type": "string", "format": "email", "example": "zaq@example.com" },
+          "password": { "type": "string", "format": "password", "example": "SecureP@ss123" }
+        },
+        "required": ["email", "password"]
+      },
+      "RefreshTokenRequest": {
+        "type": "object",
+        "properties": {
+          "refresh_token": { "type": "string", "example": "9f82ab7c31d4e08e6f1a9b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e" }
+        },
+        "required": ["refresh_token"]
+      },
+      "UpdateProfileRequest": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "example": "Zaq Doe Updated", "minLength": 2, "maxLength": 100 }
+        },
+        "required": ["name"]
+      },
+      "UserResponse": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid", "example": "550e8400-e29b-41d4-a716-446655440000" },
+          "name": { "type": "string", "example": "Zaq Doe" },
+          "email": { "type": "string", "format": "email", "example": "zaq@example.com" },
+          "role": { "type": "string", "example": "user" },
+          "created_at": { "type": "string", "format": "date-time", "example": "2026-08-24T10:00:00Z" },
+          "updated_at": { "type": "string", "format": "date-time", "example": "2026-08-24T10:00:00Z" }
+        }
+      },
+      "AuthResponse": {
+        "type": "object",
+        "properties": {
+          "access_token": { "type": "string", "example": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoi..." },
+          "refresh_token": { "type": "string", "example": "9f82ab7c31d4e08e6f1a9b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e" },
+          "user": { "$ref": "#/components/schemas/UserResponse" }
+        }
+      },
+      "PaginationMeta": {
+        "type": "object",
+        "properties": {
+          "current_page": { "type": "integer", "example": 1 },
+          "per_page": { "type": "integer", "example": 10 },
+          "total_items": { "type": "integer", "example": 45 },
+          "total_pages": { "type": "integer", "example": 5 },
+          "has_next": { "type": "boolean", "example": true },
+          "has_prev": { "type": "boolean", "example": false }
+        }
+      },
+      "PaginatedUsersResponse": {
+        "type": "object",
+        "properties": {
+          "users": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/UserResponse" }
+          },
+          "meta": { "$ref": "#/components/schemas/PaginationMeta" }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/healthz": {
+      "get": {
+        "tags": ["System"],
+        "summary": "Comprehensive System Health & Diagnostics",
+        "description": "Liveness and readiness probe reporting real-time status of PostgreSQL, Redis, Goroutines, and Memory metrics.",
+        "responses": {
+          "200": {
+            "description": "System is healthy and all dependencies are operational",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": true,
+                  "status_code": 200,
+                  "message": "System health report generated successfully",
+                  "timestamp": "2026-08-24T12:00:00.000Z",
+                  "data": {
+                    "status": "UP",
+                    "environment": "development",
+                    "version": "1.0.0",
+                    "uptime": "15m 32s",
+                    "uptime_seconds": 932,
+                    "system": {
+                      "go_version": "go1.27.0",
+                      "goroutines": 13,
+                      "memory_alloc": "2.24 MB",
+                      "memory_sys": "13.35 MB",
+                      "gc_cycles": 1,
+                      "cpu_cores": 8
+                    },
+                    "dependencies": {
+                      "database": {
+                        "status": "UP",
+                        "type": "PostgreSQL",
+                        "latency_ms": 0.19,
+                        "total_conns": 6,
+                        "acquired_conns": 0,
+                        "idle_conns": 6,
+                        "max_conns": 25
+                      },
+                      "cache": {
+                        "status": "UP",
+                        "type": "Redis",
+                        "latency_ms": 0.18
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/metrics": {
+      "get": {
+        "tags": ["System"],
+        "summary": "Prometheus Metrics Endpoint",
+        "description": "Exposes HTTP traffic, latency histograms, memory, and goroutine metrics for Prometheus scraping.",
+        "responses": {
+          "200": {
+            "description": "Prometheus text format metrics output",
+            "content": {
+              "text/plain": {
+                "example": "# HELP http_requests_total Total number of HTTP requests processed\n# TYPE http_requests_total counter\nhttp_requests_total{method=\"GET\",path=\"/api/v1/auth/profile\",status=\"200\"} 14"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/register": {
+      "post": {
+        "tags": ["Authentication"],
+        "summary": "Register a new user account",
+        "description": "Creates a new user account, stores password hash with bcrypt, issues Access & Refresh tokens, and dispatches a background task.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/RegisterRequest" },
+              "example": {
+                "name": "Zaq Doe",
+                "email": "zaq@example.com",
+                "password": "SecurePassword123",
+                "role": "user"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "User created and authenticated successfully",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": true,
+                  "status_code": 201,
+                  "message": "User registered successfully",
+                  "timestamp": "2026-08-24T12:00:00.000Z",
+                  "data": {
+                    "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                    "refresh_token": "9f82ab7c31d4e08e6f1a9b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e",
+                    "user": {
+                      "id": "5ee63488-895b-45ab-94f3-afd14c92a551",
+                      "name": "Zaq Doe",
+                      "email": "zaq@example.com",
+                      "role": "user",
+                      "created_at": "2026-08-24T12:00:00.000Z",
+                      "updated_at": "2026-08-24T12:00:00.000Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed JSON payload",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": false,
+                  "status_code": 400,
+                  "error_code": "BAD_REQUEST",
+                  "message": "Invalid JSON request payload",
+                  "timestamp": "2026-08-24T12:00:00.000Z",
+                  "errors": "unexpected EOF"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Email is already registered",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": false,
+                  "status_code": 409,
+                  "error_code": "CONFLICT",
+                  "message": "Email is already registered",
+                  "timestamp": "2026-08-24T12:00:00.000Z"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Input validation error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": false,
+                  "status_code": 422,
+                  "error_code": "VALIDATION_ERROR",
+                  "message": "Validation failed on request body",
+                  "timestamp": "2026-08-24T12:00:00.000Z",
+                  "errors": [
+                    { "field": "email", "message": "email must be a valid email address" },
+                    { "field": "password", "message": "password must be at least 6 characters" }
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded on auth endpoint",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": false,
+                  "status_code": 429,
+                  "error_code": "TOO_MANY_REQUESTS",
+                  "message": "Too many requests. Please slow down.",
+                  "timestamp": "2026-08-24T12:00:00.000Z"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": false,
+                  "status_code": 500,
+                  "error_code": "INTERNAL_SERVER_ERROR",
+                  "message": "Failed to register user",
+                  "timestamp": "2026-08-24T12:00:00.000Z",
+                  "errors": "database connection pool timeout"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "tags": ["Authentication"],
+        "summary": "User Login",
+        "description": "Authenticates credentials and returns a short-lived Access Token and a long-lived Refresh Token stored in Redis.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/LoginRequest" },
+              "example": {
+                "email": "zaq@example.com",
+                "password": "SecurePassword123"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Login successful",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": true,
+                  "status_code": 200,
+                  "message": "Login successful",
+                  "timestamp": "2026-08-24T12:00:00.000Z",
+                  "data": {
+                    "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                    "refresh_token": "9f82ab7c31d4e08e6f1a9b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e",
+                    "user": {
+                      "id": "5ee63488-895b-45ab-94f3-afd14c92a551",
+                      "name": "Zaq Doe",
+                      "email": "zaq@example.com",
+                      "role": "user",
+                      "created_at": "2026-08-24T12:00:00.000Z",
+                      "updated_at": "2026-08-24T12:00:00.000Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed JSON payload",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": false,
+                  "status_code": 400,
+                  "error_code": "BAD_REQUEST",
+                  "message": "Invalid JSON request payload",
+                  "timestamp": "2026-08-24T12:00:00.000Z"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid email or password",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": false,
+                  "status_code": 401,
+                  "error_code": "UNAUTHORIZED",
+                  "message": "Invalid email or password",
+                  "timestamp": "2026-08-24T12:00:00.000Z"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": false,
+                  "status_code": 422,
+                  "error_code": "VALIDATION_ERROR",
+                  "message": "Validation failed on request body",
+                  "timestamp": "2026-08-24T12:00:00.000Z",
+                  "errors": [
+                    { "field": "email", "message": "email is required" },
+                    { "field": "password", "message": "password is required" }
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (Anti brute-force)",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": false,
+                  "status_code": 429,
+                  "error_code": "TOO_MANY_REQUESTS",
+                  "message": "Too many requests. Please slow down.",
+                  "timestamp": "2026-08-24T12:00:00.000Z"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/refresh": {
+      "post": {
+        "tags": ["Authentication"],
+        "summary": "Refresh Access Token (Token Rotation)",
+        "description": "Validates refresh token against Redis, revokes the old token, and issues a brand new Access Token and Refresh Token pair.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/RefreshTokenRequest" },
+              "example": {
+                "refresh_token": "9f82ab7c31d4e08e6f1a9b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Token refreshed successfully",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": true,
+                  "status_code": 200,
+                  "message": "Token refreshed successfully",
+                  "timestamp": "2026-08-24T12:00:00.000Z",
+                  "data": {
+                    "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.new_token...",
+                    "refresh_token": "3a7b9c1d0e2f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b",
+                    "user": {
+                      "id": "5ee63488-895b-45ab-94f3-afd14c92a551",
+                      "name": "Zaq Doe",
+                      "email": "zaq@example.com",
+                      "role": "user",
+                      "created_at": "2026-08-24T12:00:00.000Z",
+                      "updated_at": "2026-08-24T12:00:00.000Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid, expired, or already revoked refresh token",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": false,
+                  "status_code": 401,
+                  "error_code": "UNAUTHORIZED",
+                  "message": "Invalid or expired refresh token",
+                  "timestamp": "2026-08-24T12:00:00.000Z"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "tags": ["Authentication"],
+        "summary": "Logout User & Revoke Tokens",
+        "description": "Deletes the refresh token from Redis and evicts the user profile from Redis cache.",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/RefreshTokenRequest" },
+              "example": {
+                "refresh_token": "9f82ab7c31d4e08e6f1a9b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Logged out successfully",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": true,
+                  "status_code": 200,
+                  "message": "Logged out successfully",
+                  "timestamp": "2026-08-24T12:00:00.000Z"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - Missing or invalid Bearer token",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": false,
+                  "status_code": 401,
+                  "error_code": "UNAUTHORIZED",
+                  "message": "Authorization header is missing",
+                  "timestamp": "2026-08-24T12:00:00.000Z"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/profile": {
+      "get": {
+        "tags": ["User Profile"],
+        "summary": "Get Authenticated User Profile (Redis Cached)",
+        "description": "Retrieves the current user's profile. Checks Redis cache first (sub-millisecond latency); falls back to PostgreSQL on cache miss.",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "Profile retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": true,
+                  "status_code": 200,
+                  "message": "Profile retrieved successfully",
+                  "timestamp": "2026-08-24T12:00:00.000Z",
+                  "data": {
+                    "id": "5ee63488-895b-45ab-94f3-afd14c92a551",
+                    "name": "Zaq Doe",
+                    "email": "zaq@example.com",
+                    "role": "user",
+                    "created_at": "2026-08-24T12:00:00.000Z",
+                    "updated_at": "2026-08-24T12:00:00.000Z"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized access",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": false,
+                  "status_code": 401,
+                  "error_code": "UNAUTHORIZED",
+                  "message": "Invalid or expired token",
+                  "timestamp": "2026-08-24T12:00:00.000Z"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "User profile not found in database",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": false,
+                  "status_code": 404,
+                  "error_code": "NOT_FOUND",
+                  "message": "User profile not found",
+                  "timestamp": "2026-08-24T12:00:00.000Z"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": ["User Profile"],
+        "summary": "Update Current User Profile",
+        "description": "Updates profile details in PostgreSQL and immediately invalidates the Redis profile cache.",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/UpdateProfileRequest" },
+              "example": {
+                "name": "Zaq Doe Updated"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Profile updated successfully",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": true,
+                  "status_code": 200,
+                  "message": "Profile updated successfully",
+                  "timestamp": "2026-08-24T12:00:00.000Z",
+                  "data": {
+                    "id": "5ee63488-895b-45ab-94f3-afd14c92a551",
+                    "name": "Zaq Doe Updated",
+                    "email": "zaq@example.com",
+                    "role": "user",
+                    "created_at": "2026-08-24T12:00:00.000Z",
+                    "updated_at": "2026-08-24T12:15:00.000Z"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized access",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": false,
+                  "status_code": 401,
+                  "error_code": "UNAUTHORIZED",
+                  "message": "Invalid or expired token",
+                  "timestamp": "2026-08-24T12:00:00.000Z"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": false,
+                  "status_code": 422,
+                  "error_code": "VALIDATION_ERROR",
+                  "message": "Validation failed on request body",
+                  "timestamp": "2026-08-24T12:00:00.000Z",
+                  "errors": [
+                    { "field": "name", "message": "name is required" }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/uploads": {
+      "post": {
+        "tags": ["File Uploads"],
+        "summary": "Upload File (Avatar / Document)",
+        "description": "Uploads a multipart form file (JPEG, PNG, WebP, GIF, PDF, JSON max 5MB) and stores it with a unique UUID filename.",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "Binary file to upload"
+                  }
+                },
+                "required": ["file"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "File uploaded successfully",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": true,
+                  "status_code": 201,
+                  "message": "File uploaded successfully",
+                  "timestamp": "2026-08-24T12:00:00.000Z",
+                  "data": {
+                    "original_name": "profile.png",
+                    "file_name": "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d.png",
+                    "file_path": "./uploads/a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d.png",
+                    "url": "http://localhost:8080/uploads/a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d.png",
+                    "size": 245120,
+                    "mime_type": "image/png"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing file field or exceeds max size",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": false,
+                  "status_code": 400,
+                  "error_code": "BAD_REQUEST",
+                  "message": "File size exceeds 5MB limit",
+                  "timestamp": "2026-08-24T12:00:00.000Z"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized access",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": false,
+                  "status_code": 401,
+                  "error_code": "UNAUTHORIZED",
+                  "message": "Authorization header is missing",
+                  "timestamp": "2026-08-24T12:00:00.000Z"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unsupported MIME file type",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": false,
+                  "status_code": 422,
+                  "error_code": "VALIDATION_ERROR",
+                  "message": "Unsupported file format. Allowed: JPEG, PNG, WebP, GIF, PDF, JSON",
+                  "timestamp": "2026-08-24T12:00:00.000Z"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/users": {
+      "get": {
+        "tags": ["Admin User Management"],
+        "summary": "List All Users (Admin Role Required)",
+        "description": "Retrieves paginated users list with search filter and sorting options. Protected by RBAC RequireRole('admin').",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "page", "in": "query", "description": "Page number", "schema": { "type": "integer", "default": 1 } },
+          { "name": "per_page", "in": "query", "description": "Items per page (max 100)", "schema": { "type": "integer", "default": 10 } },
+          { "name": "search", "in": "query", "description": "Search keyword for name or email", "schema": { "type": "string", "example": "zaq" } },
+          { "name": "sort_by", "in": "query", "description": "Column to sort by", "schema": { "type": "string", "default": "created_at" } },
+          { "name": "order", "in": "query", "description": "Sort order (asc or desc)", "schema": { "type": "string", "enum": ["asc", "desc"], "default": "desc" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Users list retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": true,
+                  "status_code": 200,
+                  "message": "Users retrieved successfully",
+                  "timestamp": "2026-08-24T12:00:00.000Z",
+                  "data": {
+                    "users": [
+                      {
+                        "id": "5ee63488-895b-45ab-94f3-afd14c92a551",
+                        "name": "Zaq Doe",
+                        "email": "zaq@example.com",
+                        "role": "admin",
+                        "created_at": "2026-08-24T12:00:00.000Z",
+                        "updated_at": "2026-08-24T12:00:00.000Z"
+                      },
+                      {
+                        "id": "7bf3f438-e9f0-4a8b-9a84-0a6e8e89f81a",
+                        "name": "Jane Doe",
+                        "email": "jane@example.com",
+                        "role": "user",
+                        "created_at": "2026-08-24T12:05:00.000Z",
+                        "updated_at": "2026-08-24T12:05:00.000Z"
+                      }
+                    ],
+                    "meta": {
+                      "current_page": 1,
+                      "per_page": 10,
+                      "total_items": 2,
+                      "total_pages": 1,
+                      "has_next": false,
+                      "has_prev": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized access",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": false,
+                  "status_code": 401,
+                  "error_code": "UNAUTHORIZED",
+                  "message": "Invalid or expired token",
+                  "timestamp": "2026-08-24T12:00:00.000Z"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden - Current user role is not admin",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": false,
+                  "status_code": 403,
+                  "error_code": "FORBIDDEN",
+                  "message": "Forbidden: insufficient role permissions",
+                  "timestamp": "2026-08-24T12:00:00.000Z",
+                  "errors": {
+                    "required_roles": ["admin"],
+                    "your_role": "user"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/users/{id}": {
+      "delete": {
+        "tags": ["Admin User Management"],
+        "summary": "Delete User by ID (Admin Role Required)",
+        "description": "Permanently deletes a user from PostgreSQL and removes their cached profile from Redis. Protected by RBAC RequireRole('admin').",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "UUID of the user to delete",
+            "schema": { "type": "string", "format": "uuid" },
+            "example": "5ee63488-895b-45ab-94f3-afd14c92a551"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User deleted successfully",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": true,
+                  "status_code": 200,
+                  "message": "User deleted successfully",
+                  "timestamp": "2026-08-24T12:00:00.000Z"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid UUID format",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": false,
+                  "status_code": 400,
+                  "error_code": "BAD_REQUEST",
+                  "message": "Invalid user ID UUID format",
+                  "timestamp": "2026-08-24T12:00:00.000Z"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized access",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": false,
+                  "status_code": 401,
+                  "error_code": "UNAUTHORIZED",
+                  "message": "Authorization header is missing",
+                  "timestamp": "2026-08-24T12:00:00.000Z"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden - Current user role is not admin",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": false,
+                  "status_code": 403,
+                  "error_code": "FORBIDDEN",
+                  "message": "Forbidden: insufficient role permissions",
+                  "timestamp": "2026-08-24T12:00:00.000Z",
+                  "errors": {
+                    "required_roles": ["admin"],
+                    "your_role": "user"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "User not found",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": false,
+                  "status_code": 404,
+                  "error_code": "NOT_FOUND",
+                  "message": "User not found",
+                  "timestamp": "2026-08-24T12:00:00.000Z"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

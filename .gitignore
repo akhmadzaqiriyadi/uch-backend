@@ -1,0 +1,28 @@
+# Binaries and build artifacts
+bin/
+tmp/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test and coverage artifacts
+*.out
+*.test
+coverage.txt
+coverage.html
+
+# Local Environment Variables
+.env
+
+# Uploaded media storage
+uploads/*
+!uploads/.gitkeep
+
+# IDE and OS files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+build-errors.log

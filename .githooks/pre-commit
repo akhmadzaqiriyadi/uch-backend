@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+
+set -e
+
+echo "🔍 [Pre-Commit Hook] Running quality checks..."
+
+# 1. Format code
+echo "🧹 Formatting Go code..."
+gofmt -s -w .
+if command -v goimports >/dev/null 2>&1; then
+    goimports -w .
+fi
+
+# 2. Run GolangCI-Lint
+echo "🔬 Running golangci-lint..."
+if command -v golangci-lint >/dev/null 2>&1; then
+    golangci-lint run ./...
+else
+    echo "⚠️ golangci-lint not found, running go vet..."
+    go vet ./...
+fi
+
+# 3. Run Unit Tests
+echo "🧪 Running unit tests..."
+go test -race ./...
+
+echo "✅ [Pre-Commit Hook] All checks passed! Proceeding with commit."
