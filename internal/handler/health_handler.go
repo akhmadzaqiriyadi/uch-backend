@@ -31,13 +31,13 @@ func NewHealthHandler(cfg *config.Config, db *pgxpool.Pool, cache cache.Cache) *
 }
 
 type HealthResponse struct {
-	Status       string           `json:"status"`
-	Environment  string           `json:"environment"`
-	Version      string           `json:"version"`
-	Uptime       string           `json:"uptime"`
-	UptimeSec    int64            `json:"uptime_seconds"`
-	System       SystemMetrics    `json:"system"`
-	Dependencies DependencyHealth `json:"dependencies"`
+	Status       string             `json:"status"`
+	Environment  string             `json:"environment"`
+	Build        config.VersionInfo `json:"build"`
+	Uptime       string             `json:"uptime"`
+	UptimeSec    int64              `json:"uptime_seconds"`
+	System       SystemMetrics      `json:"system"`
+	Dependencies DependencyHealth   `json:"dependencies"`
 }
 
 type SystemMetrics struct {
@@ -122,7 +122,7 @@ func (h *HealthHandler) Check(w http.ResponseWriter, _ *http.Request) {
 	data := HealthResponse{
 		Status:      overallStatus,
 		Environment: h.cfg.App.Env,
-		Version:     "1.0.0",
+		Build:       config.GetVersionInfo(),
 		Uptime:      uptimeDuration.Round(time.Second).String(),
 		UptimeSec:   int64(uptimeDuration.Seconds()),
 		System: SystemMetrics{

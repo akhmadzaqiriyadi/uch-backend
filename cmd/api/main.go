@@ -18,6 +18,7 @@ import (
 	"gozaq/internal/repository/postgres"
 	"gozaq/internal/service"
 	"gozaq/pkg/cache"
+	"gozaq/pkg/database"
 	"gozaq/pkg/mailer"
 	"gozaq/pkg/storage"
 	"gozaq/pkg/worker"
@@ -64,6 +65,11 @@ func main() {
 		logger.Warn("Database ping failed, continuing anyway (check if DB is ready)", slog.String("error", err.Error()))
 	} else {
 		logger.Info("Database connection pool established successfully")
+
+		// Automatically apply any pending SQL migrations on startup
+		if err := database.AutoMigrate(ctx, dbPool, "./migrations"); err != nil {
+			logger.Error("Failed to apply automatic database migrations", slog.String("error", err.Error()))
+		}
 	}
 
 	// 2. Redis Cache Connection (with Noop fallback if unavailable)

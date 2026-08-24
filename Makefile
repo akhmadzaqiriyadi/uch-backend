@@ -1,4 +1,8 @@
-.PHONY: run dev build test tidy fmt lint audit docker-up docker-down
+# Variables for build metadata
+VERSION ?= 1.0.0
+GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "development")
+BUILD_TIME ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+LDFLAGS = -w -s -X 'gozaq/config.Version=$(VERSION)' -X 'gozaq/config.GitCommit=$(GIT_COMMIT)' -X 'gozaq/config.BuildTime=$(BUILD_TIME)'
 
 # Run application directly
 run:
@@ -17,9 +21,9 @@ hook-install:
 seed:
 	go run cmd/seed/main.go
 
-# Build binary
+# Build binary with metadata
 build:
-	CGO_ENABLED=0 go build -ldflags="-w -s" -o bin/api cmd/api/main.go
+	CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o bin/api cmd/api/main.go
 
 # Run unit tests with race detector and coverage
 test:
