@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src=".github/assets/logo.png" alt="Gozaq Logo" width="240" />
+
 # ⚡ Gozaq - Production-Grade Go Backend Boilerplate
 
 **An enterprise-grade, clean architecture Go backend boilerplate packed with PostgreSQL, SQLC Configuration, Redis Caching, Distributed Locking & Rate Limiting, Dynamic Multi-Role RBAC & PBAC Permissions, SingleFlight Anti-Stampede, Circuit Breakers, Scalar OpenAPI Docs, Prometheus Observability, and Automated CI/CD.**
