@@ -41,6 +41,10 @@ type UpdateProfileRequest struct {
 	Name string `json:"name" validate:"required,min=2,max=100"`
 }
 
+type UpdateRoleRequest struct {
+	Role string `json:"role" validate:"required,oneof=user manager admin"`
+}
+
 type AuthResponse struct {
 	AccessToken  string       `json:"access_token"`
 	RefreshToken string       `json:"refresh_token"`
@@ -83,6 +87,7 @@ type UserRepository interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*User, error)
 	GetByEmail(ctx context.Context, email string) (*User, error)
 	Update(ctx context.Context, user *User) error
+	UpdateRole(ctx context.Context, id uuid.UUID, role string) error
 	Delete(ctx context.Context, id uuid.UUID) error
 	List(ctx context.Context, p pagination.Params, search string) ([]*User, int, error)
 }
@@ -94,6 +99,7 @@ type UserService interface {
 	Logout(ctx context.Context, userID uuid.UUID, refreshToken string) error
 	GetProfile(ctx context.Context, userID uuid.UUID) (*UserResponse, error)
 	UpdateProfile(ctx context.Context, userID uuid.UUID, req UpdateProfileRequest) (*UserResponse, error)
+	UpdateUserRole(ctx context.Context, userID uuid.UUID, role string) (*UserResponse, error)
 	ListUsers(ctx context.Context, p pagination.Params, search string) (*PaginatedUsersResponse, error)
 	DeleteUser(ctx context.Context, userID uuid.UUID) error
 }

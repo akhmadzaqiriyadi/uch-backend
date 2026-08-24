@@ -953,6 +953,114 @@
           }
         }
       }
+    },
+    "/api/v1/users/{id}/role": {
+      "put": {
+        "tags": ["Admin User Management"],
+        "summary": "Update User Role (Dynamic RBAC)",
+        "description": "Changes user role (user/manager/admin), re-calculates permissions, and immediately invalidates profile/permission cache. Protected by 'roles:manage' permission.",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "role": { "type": "string", "enum": ["user", "manager", "admin"], "example": "manager" }
+                },
+                "required": ["role"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "User role updated successfully",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": true,
+                  "status_code": 200,
+                  "message": "User role updated successfully",
+                  "timestamp": "2026-08-24T12:00:00.000Z",
+                  "data": {
+                    "id": "5ee63488-895b-45ab-94f3-afd14c92a551",
+                    "name": "Jane Doe",
+                    "email": "jane@example.com",
+                    "role": "manager",
+                    "permissions": ["users:read", "users:update", "uploads:create", "audit:read"]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/roles": {
+      "get": {
+        "tags": ["RBAC & Permissions"],
+        "summary": "List All System Roles & Granted Permissions",
+        "description": "Retrieves all roles (admin, manager, user) and their assigned granular permissions. Protected by 'roles:read' permission.",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "Roles and permissions retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": true,
+                  "status_code": 200,
+                  "message": "Roles retrieved successfully",
+                  "timestamp": "2026-08-24T12:00:00.000Z",
+                  "data": [
+                    { "id": "admin", "name": "Administrator", "description": "Full system access", "permissions": [{ "id": "users:read" }, { "id": "users:delete" }] },
+                    { "id": "manager", "name": "Manager", "description": "Manager access", "permissions": [{ "id": "users:read" }, { "id": "uploads:create" }] },
+                    { "id": "user", "name": "Standard User", "description": "Regular user", "permissions": [{ "id": "uploads:create" }] }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/permissions": {
+      "get": {
+        "tags": ["RBAC & Permissions"],
+        "summary": "List All Master Permissions",
+        "description": "Retrieves the catalog of all granular permissions across all modules. Protected by 'roles:read' permission.",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "Permissions catalog retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": true,
+                  "status_code": 200,
+                  "message": "Permissions retrieved successfully",
+                  "timestamp": "2026-08-24T12:00:00.000Z",
+                  "data": [
+                    { "id": "users:read", "name": "View Users", "module": "users", "description": "List and view users" },
+                    { "id": "users:create", "name": "Create User", "module": "users", "description": "Create users" },
+                    { "id": "users:delete", "name": "Delete User", "module": "users", "description": "Delete users" },
+                    { "id": "roles:manage", "name": "Manage Roles", "module": "roles", "description": "Modify permissions" },
+                    { "id": "uploads:create", "name": "Upload Files", "module": "uploads", "description": "Upload media" }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

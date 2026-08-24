@@ -232,6 +232,27 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID uuid.UUID, req d
 	return &resp, nil
 }
 
+func (s *UserService) UpdateUserRole(ctx context.Context, userID uuid.UUID, role string) (*domain.UserResponse, error) {
+	user, err := s.repo.GetByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := s.repo.UpdateRole(ctx, userID, role); err != nil {
+		return nil, err
+	}
+
+	user.Role = role
+	user.UpdatedAt = time.Now().UTC()
+
+	// Invalidate Redis profile cache
+	_ = s.cache.Delete(ctx, fmt.Sprintf("user:profile:%s", userID.String()))
+
+	permissions := s.getRolePermissions(ctx, role)
+	resp := user.ToResponse(permissions...)
+	return &resp, nil
+}
+
 func (s *UserService) ListUsers(ctx context.Context, p pagination.Params, search string) (*domain.PaginatedUsersResponse, error) {
 	users, totalItems, err := s.repo.List(ctx, p, search)
 	if err != nil {

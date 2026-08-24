@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -102,19 +103,30 @@ func (r *UserRepository) GetByEmail(ctx context.Context, email string) (*domain.
 }
 
 func (r *UserRepository) Update(ctx context.Context, user *domain.User) error {
+	db := database.GetDBTX(ctx, r.db)
 	query := `
 		UPDATE users
-		SET name = $2, updated_at = $3
+		SET name = $2, role = $3, updated_at = $4
 		WHERE id = $1
 	`
-	cmdTag, err := r.db.Exec(ctx, query, user.ID, user.Name, user.UpdatedAt)
-	if err != nil {
-		return fmt.Errorf("failed to update user: %w", err)
-	}
-	if cmdTag.RowsAffected() == 0 {
-		return domain.ErrNotFound
-	}
-	return nil
+	_, err := db.Exec(ctx, query,
+		user.ID,
+		user.Name,
+		user.Role,
+		user.UpdatedAt,
+	)
+	return err
+}
+
+func (r *UserRepository) UpdateRole(ctx context.Context, id uuid.UUID, role string) error {
+	db := database.GetDBTX(ctx, r.db)
+	query := `
+		UPDATE users
+		SET role = $2, updated_at = $3
+		WHERE id = $1
+	`
+	_, err := db.Exec(ctx, query, id, role, time.Now().UTC())
+	return err
 }
 
 func (r *UserRepository) Delete(ctx context.Context, id uuid.UUID) error {

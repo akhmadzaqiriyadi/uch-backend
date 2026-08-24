@@ -193,3 +193,35 @@ func (h *UserHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 
 	response.OK(w, "User deleted successfully", nil)
 }
+
+func (h *UserHandler) UpdateUserRole(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	targetID, err := uuid.Parse(idStr)
+	if err != nil {
+		response.BadRequest(w, "Invalid user ID UUID format", nil)
+		return
+	}
+
+	var req domain.UpdateRoleRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.BadRequest(w, "Invalid JSON request payload", err.Error())
+		return
+	}
+
+	if errs := validator.ValidateStruct(req); len(errs) > 0 {
+		response.UnprocessableEntity(w, "Validation failed on request body", errs)
+		return
+	}
+
+	user, err := h.userService.UpdateUserRole(r.Context(), targetID, req.Role)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			response.NotFound(w, "User not found")
+			return
+		}
+		response.InternalServerError(w, "Failed to update user role", err.Error())
+		return
+	}
+
+	response.OK(w, "User role updated successfully", user)
+}

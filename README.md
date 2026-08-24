@@ -2,11 +2,12 @@
 
 # ⚡ Gozaq - Production-Grade Go Backend Boilerplate
 
-**An enterprise-grade, clean architecture Go backend boilerplate packed with PostgreSQL, Redis Caching, Distributed Locking & Rate Limiting, SingleFlight Anti-Stampede, Circuit Breakers, RBAC, Scalar OpenAPI Docs, Prometheus Observability, Pprof Profiling, and Automated CI/CD.**
+**An enterprise-grade, clean architecture Go backend boilerplate packed with PostgreSQL, SQLC Configuration, Redis Caching, Distributed Locking & Rate Limiting, Dynamic Multi-Role RBAC & PBAC Permissions, SingleFlight Anti-Stampede, Circuit Breakers, Scalar OpenAPI Docs, Prometheus Observability, and Automated CI/CD.**
 
 [![CI Pipeline](https://github.com/akhmadzaqiriyadi/gozaq/actions/workflows/ci.yml/badge.svg)](https://github.com/akhmadzaqiriyadi/gozaq/actions)
 [![Go Version](https://img.shields.io/badge/Go-1.24%2B-00ADD8?style=flat&logo=go)](https://golang.org)
 [![Clean Architecture](https://img.shields.io/badge/Architecture-Clean%20Arch-FF6B6B?style=flat)](https://blog.cleancoder.com)
+[![SQLC Ready](https://img.shields.io/badge/SQL-SQLC%20Ready-00ADD8?style=flat)](https://sqlc.dev)
 [![Scalar Docs](https://img.shields.io/badge/API%20Docs-Scalar%20UI-7C3AED?style=flat)](http://localhost:8080/docs)
 [![PostgreSQL](https://img.shields.io/badge/Database-PostgreSQL%20%2B%20pgx-336791?style=flat&logo=postgresql)](https://www.postgresql.org)
 [![Redis](https://img.shields.io/badge/Cache%20%26%20Lock-Redis-DC382D?style=flat&logo=redis)](https://redis.io)
@@ -20,7 +21,15 @@
 ## 🌟 High-Concurrency & Enterprise Features
 
 * **🏛️ Clean & Layered Architecture**: Domain-driven design with strict separation of concerns (`domain` $\to$ `service` $\to$ `repository` $\to$ `handler`).
-* **🐘 High-Performance PostgreSQL**: Powered by `pgx/v5` with connection pooling, statement caching, **automatic startup migrations**, and Prometheus pool metrics.
+* **🐘 High-Performance PostgreSQL & SQLC Ready**:
+  - Powered by `pgx/v5` with connection pooling, statement caching, **automatic startup migrations**, and Prometheus pool metrics.
+  - Includes **SQLC (`sqlc.yaml` & `sql/queries/*.sql`)** ready for type-safe code generation.
+* **👑 Dynamic Multi-Role RBAC & PBAC (Granular Permissions)**:
+  - Default Roles: `admin`, `manager`, `user`.
+  - Granular Permissions: `users:read`, `users:create`, `users:update`, `users:delete`, `roles:read`, `roles:manage`, `uploads:create`, `audit:read`.
+  - **Permission Guards**: `middleware.RequirePermission("users:delete")` and `middleware.RequireAnyPermission(...)`.
+  - **Dynamic Role Assignment Endpoint**: `PUT /api/v1/users/{id}/role` (instantly recalculates permissions & evicts cache).
+  - Sub-millisecond Redis permission caching (`role:permissions:<role_id>`).
 * **🛡️ SingleFlight (`golang.org/x/sync/singleflight`) - Anti Cache Stampede**:
   - Eliminates the *Thundering Herd* problem when cache expires under high load by deduplicating concurrent database queries.
 * **🔒 Redis Distributed Stack**:
@@ -32,7 +41,6 @@
 * **⚡ Resilient Circuit Breaker (`pkg/resilience/circuit_breaker.go`)**: Protects the application against cascading failures from third-party APIs / external services.
 * **🛡️ Security & Guarding**:
   - **OWASP Security Headers** (Go's Helmet: CSP, HSTS, X-Frame-Options, No-Sniff).
-  - **Role-Based Access Control (RBAC)** (`admin` vs `user` roles).
   - **Structured Panic Recovery** logging full stack-traces with unified JSON 500 responses.
 * **📖 Interactive Scalar API Reference (`/docs`)**: Modern, interactive documentation embedded directly from OpenAPI 3.1 schema.
 * **📊 Observability & Diagnostics**:
@@ -59,10 +67,10 @@ gozaq/
 ├── config/               # Environment variables & build-time metadata (ldflags)
 ├── docs/                 # OpenAPI 3.1 specification schema
 ├── internal/
-│   ├── domain/           # Core Entities, DTOs, and Repository/Service Interfaces
-│   ├── handler/          # HTTP Handlers (User, Upload, Docs, Diagnostics)
-│   │   └── middleware/   # Auth, Security Headers, Rate Limiter, Logger, Metrics, Recovery
-│   ├── repository/       # Data Access Layer (PostgreSQL with pgxpool & DBTX)
+│   ├── domain/           # Core Entities (User, RBAC), DTOs, and Repository/Service Interfaces
+│   ├── handler/          # HTTP Handlers (User, Upload, RBAC, Docs, Diagnostics)
+│   │   └── middleware/   # Auth (JWT & PBAC), Security Headers, Rate Limiter, Logger, Metrics, Recovery
+│   ├── repository/       # Data Access Layer (PostgreSQL with pgxpool, DBTX, & RBAC)
 │   └── service/          # Business Logic with SingleFlight & Async Tasks
 ├── migrations/           # SQL Migration files (.up.sql / .down.sql)
 ├── pkg/
@@ -75,6 +83,9 @@ gozaq/
 │   ├── storage/          # Multipart file storage manager with MIME sniffing
 │   ├── validator/        # Struct payload validation (go-playground/validator)
 │   └── worker/           # Async Goroutine Worker Pool with graceful shutdown
+├── sql/
+│   └── queries/          # Type-safe SQL query files for SQLC (users.sql, rbac.sql)
+├── sqlc.yaml             # SQLC codegen configuration
 ├── .air.toml             # Live hot-reload config
 ├── .github/workflows/    # GitHub Actions CI pipeline
 ├── .githooks/            # Git Pre-commit hook script
@@ -120,56 +131,21 @@ The server will start on `http://localhost:8080`.
 
 ---
 
-## 💡 Advanced Technical Patterns & Code Examples
+## 💡 Dynamic RBAC & PBAC Usage
 
-### 1. Anti Cache-Stampede with SingleFlight
 ```go
-// Only 1 concurrent DB query per key; other concurrent callers wait and share the result
-v, err, _ := s.sfGroup.Do(cacheKey, func() (any, error) {
-    user, err := s.repo.GetByID(ctx, userID)
-    if err != nil {
-        return nil, err
-    }
-    resp := user.ToResponse()
-    _ = s.cache.Set(ctx, cacheKey, resp, 15*time.Minute)
-    return &resp, nil
-})
-```
+// 1. Guard endpoint with granular permission
+r.With(middleware.RequirePermission("users:delete")).
+    Delete("/users/{id}", userHandler.DeleteUser)
 
-### 2. Redis Distributed Locking (Multi-Instance Mutex)
-```go
-locker := cache.NewRedisLocker(redisClient)
-
-// Safely execute critical operations across multiple server instances
-err := locker.WithLock(ctx, "order:checkout:user-123", 5*time.Second, func(ctx context.Context) error {
-    return processPayment()
-})
-```
-
-### 3. Circuit Breaker for External Service Calls
-```go
-cb := resilience.NewCircuitBreaker(5, 30*time.Second)
-
-err := cb.Execute(func() error {
-    return thirdPartyPaymentAPI.Charge(payload)
-})
-```
-
-### 4. Atomic Database Transactions (Unit of Work)
-```go
-err := database.WithinTransaction(ctx, dbPool, func(txCtx context.Context) error {
-    if err := userRepo.Create(txCtx, user); err != nil {
-        return err // Automatically ROLLBACK
-    }
-    return walletRepo.Create(txCtx, wallet) // Automatically COMMIT if all succeed
-})
+// 2. Guard endpoint with multiple permission options
+r.With(middleware.RequireAnyPermission("roles:read", "roles:manage")).
+    Get("/roles", rbacHandler.ListRoles)
 ```
 
 ---
 
 ## 🐳 Running with Docker Compose
-
-To launch the complete stack (PostgreSQL + Redis + API) in one command:
 
 ```bash
 # Start all services in background
@@ -189,28 +165,31 @@ make docker-down
 Once the server is running, open your browser:
 👉 **[http://localhost:8080/docs](http://localhost:8080/docs)**
 
-Rendered by **Scalar UI**, you can test every endpoint directly from the browser, inspect exact JSON request/response schemas, and explore all status codes (`200`, `201`, `400`, `401`, `403`, `404`, `409`, `422`, `429`, `500`).
-
 ---
 
 ## 🛣️ API Endpoints Summary
 
-| Method | Endpoint | Description | Auth / Role |
+| Method | Endpoint | Description | Permission / Guard |
 | :--- | :--- | :--- | :--- |
 | **`GET`** | `/healthz` | System & Dependencies Diagnostics | Public |
 | **`GET`** | `/metrics` | Prometheus Metrics Exporter | Public |
 | **`GET`** | `/docs` | Scalar Interactive API Reference | Public |
 | **`GET`** | `/debug/pprof/*`| Go Runtime Profiler (CPU, Heap, Goroutines) | Public / Internal |
-| **`POST`** | `/api/v1/auth/register` | Register new account & generate tokens | Public (Rate Limited 5 RPS) |
-| **`POST`** | `/api/v1/auth/login` | Login with email & password | Public (Rate Limited 5 RPS) |
+| **`POST`** | `/api/v1/auth/register` | Register new account & generate tokens | Public (5 RPS) |
+| **`POST`** | `/api/v1/auth/login` | Login with email & password | Public (5 RPS) |
 | **`POST`** | `/api/v1/auth/refresh` | Refresh Access Token (Token Rotation) | Public |
 | **`POST`** | `/api/v1/auth/logout` | Logout & Revoke Redis Refresh Token | Bearer JWT |
-| **`GET`** | `/api/v1/auth/profile` | Get user profile (Redis + SingleFlight) | Bearer JWT |
+| **`GET`** | `/api/v1/auth/profile` | Get user profile with permissions | Bearer JWT |
 | **`PUT`** | `/api/v1/auth/profile` | Update profile & invalidate Redis cache | Bearer JWT |
-| **`POST`** | `/api/v1/uploads` | Upload avatar/file (JPEG/PNG/PDF max 5MB) | Bearer JWT |
+| **`POST`** | `/api/v1/uploads` | Upload avatar/file (JPEG/PNG/PDF max 5MB) | `uploads:create` |
 | **`GET`** | `/uploads/*` | Static file server for uploaded media | Public |
-| **`GET`** | `/api/v1/users` | List users with pagination & search | **Admin Only** |
-| **`DELETE`**| `/api/v1/users/{id}` | Delete user by UUID | **Admin Only** |
+| **`GET`** | `/api/v1/users` | List users with pagination & search | `users:read` |
+| **`PUT`** | `/api/v1/users/{id}/role` | Update user role dynamically | `roles:manage` |
+| **`DELETE`**| `/api/v1/users/{id}` | Delete user by UUID | `users:delete` |
+| **`GET`** | `/api/v1/roles` | List all system roles & permissions | `roles:read` |
+| **`GET`** | `/api/v1/permissions` | List all master system permissions | `roles:read` |
+| **`POST`** | `/api/v1/roles/{role_id}/permissions/{permission_id}` | Assign permission to role | `roles:manage` |
+| **`DELETE`**| `/api/v1/roles/{role_id}/permissions/{permission_id}` | Revoke permission from role | `roles:manage` |
 
 ---
 

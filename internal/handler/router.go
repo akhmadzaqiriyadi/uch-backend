@@ -107,6 +107,9 @@ func NewRouter(
 			r.With(middleware.RequirePermission("users:delete")).
 				Delete("/users/{id}", userHandler.DeleteUser)
 
+			r.With(middleware.RequirePermission("roles:manage")).
+				Put("/users/{id}/role", userHandler.UpdateUserRole)
+
 			// Dynamic RBAC & PBAC Management (Admin Only / roles:manage)
 			r.Group(func(r chi.Router) {
 				r.Use(middleware.RequireAnyPermission("roles:read", "roles:manage"))

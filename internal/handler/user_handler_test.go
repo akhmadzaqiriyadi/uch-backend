@@ -68,6 +68,14 @@ func (m *MockUserService) UpdateProfile(ctx context.Context, userID uuid.UUID, r
 	return args.Get(0).(*domain.UserResponse), args.Error(1)
 }
 
+func (m *MockUserService) UpdateUserRole(ctx context.Context, userID uuid.UUID, role string) (*domain.UserResponse, error) {
+	args := m.Called(ctx, userID, role)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*domain.UserResponse), args.Error(1)
+}
+
 func (m *MockUserService) ListUsers(ctx context.Context, p pagination.Params, search string) (*domain.PaginatedUsersResponse, error) {
 	args := m.Called(ctx, p, search)
 	if args.Get(0) == nil {
