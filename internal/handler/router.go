@@ -22,6 +22,7 @@ func NewRouter(
 	docsHandler *DocsHandler,
 	healthHandler *HealthHandler,
 	uploadHandler *UploadHandler,
+	rbacHandler *RBACHandler,
 ) http.Handler {
 	r := chi.NewRouter()
 
@@ -54,7 +55,7 @@ func NewRouter(
 		AllowedOrigins:   []string{"*"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
-		ExposedHeaders:   []string{"Link"},
+		ExposedHeaders:   []string{"Link", "X-Request-ID", "X-Response-Time"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
@@ -87,7 +88,7 @@ func NewRouter(
 			r.Post("/auth/refresh", userHandler.RefreshToken)
 		})
 
-		// Protected User Routes (Requires valid JWT Access Token)
+		// Protected Routes (Requires valid JWT Access Token)
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.Auth(cfg))
 
@@ -95,15 +96,30 @@ func NewRouter(
 			r.Get("/auth/profile", userHandler.GetProfile)
 			r.Put("/auth/profile", userHandler.UpdateProfile)
 
-			// File Upload Endpoint
-			r.Post("/uploads", uploadHandler.UploadFile)
+			// File Upload Endpoint (Protected by PBAC: uploads:create)
+			r.With(middleware.RequirePermission("uploads:create")).
+				Post("/uploads", uploadHandler.UploadFile)
 
-			// Admin-Only Routes (RBAC Protected)
+			// User Management (Protected by Granular Permissions: users:read & users:delete)
+			r.With(middleware.RequirePermission("users:read")).
+				Get("/users", userHandler.ListUsers)
+
+			r.With(middleware.RequirePermission("users:delete")).
+				Delete("/users/{id}", userHandler.DeleteUser)
+
+			// Dynamic RBAC & PBAC Management (Admin Only / roles:manage)
 			r.Group(func(r chi.Router) {
-				r.Use(middleware.RequireRole("admin"))
+				r.Use(middleware.RequireAnyPermission("roles:read", "roles:manage"))
 
-				r.Get("/users", userHandler.ListUsers)
-				r.Delete("/users/{id}", userHandler.DeleteUser)
+				r.Get("/roles", rbacHandler.ListRoles)
+				r.Get("/permissions", rbacHandler.ListPermissions)
+			})
+
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequirePermission("roles:manage"))
+
+				r.Post("/roles/{role_id}/permissions/{permission_id}", rbacHandler.AssignPermission)
+				r.Delete("/roles/{role_id}/permissions/{permission_id}", rbacHandler.RevokePermission)
 			})
 		})
 	})

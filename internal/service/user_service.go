@@ -23,44 +23,45 @@ import (
 )
 
 type UserService struct {
-	repo    domain.UserRepository
-	cache   cache.Cache
-	worker  *worker.Pool
-	mailer  mailer.Mailer
-	cfg     *config.Config
-	sfGroup singleflight.Group
+	repo     domain.UserRepository
+	rbacRepo domain.RBACRepository
+	cache    cache.Cache
+	worker   *worker.Pool
+	mailer   mailer.Mailer
+	cfg      *config.Config
+	sfGroup  singleflight.Group
 }
 
 type JWTClaims struct {
-	UserID uuid.UUID `json:"user_id"`
-	Email  string    `json:"email"`
-	Role   string    `json:"role"`
+	UserID      uuid.UUID `json:"user_id"`
+	Email       string    `json:"email"`
+	Role        string    `json:"role"`
+	Permissions []string  `json:"permissions,omitempty"`
 	jwt.RegisteredClaims
 }
 
 func NewUserService(
 	repo domain.UserRepository,
+	rbacRepo domain.RBACRepository,
 	cache cache.Cache,
 	workerPool *worker.Pool,
 	mailer mailer.Mailer,
 	cfg *config.Config,
 ) *UserService {
 	return &UserService{
-		repo:   repo,
-		cache:  cache,
-		worker: workerPool,
-		mailer: mailer,
-		cfg:    cfg,
+		repo:     repo,
+		rbacRepo: rbacRepo,
+		cache:    cache,
+		worker:   workerPool,
+		mailer:   mailer,
+		cfg:      cfg,
 	}
 }
 
 func (s *UserService) Register(ctx context.Context, req domain.RegisterRequest) (*domain.AuthResponse, error) {
-	_, err := s.repo.GetByEmail(ctx, req.Email)
-	if err == nil {
+	existingUser, err := s.repo.GetByEmail(ctx, req.Email)
+	if err == nil && existingUser != nil {
 		return nil, domain.ErrAlreadyExists
-	}
-	if !errors.Is(err, domain.ErrNotFound) {
-		return nil, fmt.Errorf("error checking existing user: %w", err)
 	}
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
@@ -68,9 +69,9 @@ func (s *UserService) Register(ctx context.Context, req domain.RegisterRequest) 
 		return nil, fmt.Errorf("failed to hash password: %w", err)
 	}
 
-	role := req.Role
-	if role == "" {
-		role = "user"
+	role := "user"
+	if req.Role != "" {
+		role = req.Role
 	}
 
 	now := time.Now().UTC()
@@ -85,10 +86,12 @@ func (s *UserService) Register(ctx context.Context, req domain.RegisterRequest) 
 	}
 
 	if err := s.repo.Create(ctx, user); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create user: %w", err)
 	}
 
-	accessToken, refreshToken, err := s.issueTokens(ctx, user)
+	permissions := s.getRolePermissions(ctx, user.Role)
+
+	accessToken, refreshToken, err := s.issueTokens(ctx, user, permissions)
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +105,7 @@ func (s *UserService) Register(ctx context.Context, req domain.RegisterRequest) 
 	return &domain.AuthResponse{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		User:         user.ToResponse(),
+		User:         user.ToResponse(permissions...),
 	}, nil
 }
 
@@ -119,7 +122,9 @@ func (s *UserService) Login(ctx context.Context, req domain.LoginRequest) (*doma
 		return nil, domain.ErrInvalidCredentials
 	}
 
-	accessToken, refreshToken, err := s.issueTokens(ctx, user)
+	permissions := s.getRolePermissions(ctx, user.Role)
+
+	accessToken, refreshToken, err := s.issueTokens(ctx, user, permissions)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +132,7 @@ func (s *UserService) Login(ctx context.Context, req domain.LoginRequest) (*doma
 	return &domain.AuthResponse{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		User:         user.ToResponse(),
+		User:         user.ToResponse(permissions...),
 	}, nil
 }
 
@@ -152,8 +157,10 @@ func (s *UserService) RefreshToken(ctx context.Context, req domain.RefreshTokenR
 	// 2. Token Rotation: Revoke old refresh token from Redis
 	_ = s.cache.Delete(ctx, redisKey)
 
+	permissions := s.getRolePermissions(ctx, user.Role)
+
 	// 3. Issue brand new Access Token & Refresh Token
-	accessToken, refreshToken, err := s.issueTokens(ctx, user)
+	accessToken, refreshToken, err := s.issueTokens(ctx, user, permissions)
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +168,7 @@ func (s *UserService) RefreshToken(ctx context.Context, req domain.RefreshTokenR
 	return &domain.AuthResponse{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		User:         user.ToResponse(),
+		User:         user.ToResponse(permissions...),
 	}, nil
 }
 
@@ -191,7 +198,8 @@ func (s *UserService) GetProfile(ctx context.Context, userID uuid.UUID) (*domain
 			return nil, err
 		}
 
-		resp := user.ToResponse()
+		permissions := s.getRolePermissions(ctx, user.Role)
+		resp := user.ToResponse(permissions...)
 		_ = s.cache.Set(ctx, cacheKey, resp, 15*time.Minute)
 		return &resp, nil
 	})
@@ -219,7 +227,8 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID uuid.UUID, req d
 	// Invalidate Redis profile cache
 	_ = s.cache.Delete(ctx, fmt.Sprintf("user:profile:%s", userID.String()))
 
-	resp := user.ToResponse()
+	permissions := s.getRolePermissions(ctx, user.Role)
+	resp := user.ToResponse(permissions...)
 	return &resp, nil
 }
 
@@ -252,12 +261,34 @@ func (s *UserService) DeleteUser(ctx context.Context, userID uuid.UUID) error {
 	return nil
 }
 
-func (s *UserService) issueTokens(ctx context.Context, user *domain.User) (string, string, error) {
-	// 1. Generate Access Token (15 Minutes)
+func (s *UserService) getRolePermissions(ctx context.Context, roleID string) []string {
+	if s.rbacRepo == nil {
+		return []string{}
+	}
+
+	cacheKey := fmt.Sprintf("role:permissions:%s", roleID)
+	var perms []string
+	if err := s.cache.Get(ctx, cacheKey, &perms); err == nil && len(perms) > 0 {
+		return perms
+	}
+
+	perms, err := s.rbacRepo.GetPermissionsByRole(ctx, roleID)
+	if err != nil {
+		slog.Warn("Failed to fetch role permissions from database", slog.String("role", roleID), slog.String("error", err.Error()))
+		return []string{}
+	}
+
+	_ = s.cache.Set(ctx, cacheKey, perms, 1*time.Hour)
+	return perms
+}
+
+func (s *UserService) issueTokens(ctx context.Context, user *domain.User, permissions []string) (string, string, error) {
+	// 1. Generate Access Token (15 Minutes) with Role and Granular Permissions
 	claims := JWTClaims{
-		UserID: user.ID,
-		Email:  user.Email,
-		Role:   user.Role,
+		UserID:      user.ID,
+		Email:       user.Email,
+		Role:        user.Role,
+		Permissions: permissions,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(15 * time.Minute)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

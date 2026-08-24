@@ -17,8 +17,9 @@ import (
 type contextKey string
 
 const (
-	UserIDKey   contextKey = "userID"
-	UserRoleKey contextKey = "userRole"
+	UserIDKey          contextKey = "userID"
+	UserRoleKey        contextKey = "userRole"
+	UserPermissionsKey contextKey = "userPermissions"
 )
 
 func Auth(cfg *config.Config) func(next http.Handler) http.Handler {
@@ -72,8 +73,18 @@ func Auth(cfg *config.Config) func(next http.Handler) http.Handler {
 				role = "user"
 			}
 
+			var permissions []string
+			if rawPerms, exists := claims["permissions"].([]any); exists {
+				for _, p := range rawPerms {
+					if pStr, ok := p.(string); ok {
+						permissions = append(permissions, pStr)
+					}
+				}
+			}
+
 			ctx := context.WithValue(r.Context(), UserIDKey, userID)
 			ctx = context.WithValue(ctx, UserRoleKey, role)
+			ctx = context.WithValue(ctx, UserPermissionsKey, permissions)
 
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
@@ -107,6 +118,67 @@ func RequireRole(allowedRoles ...string) func(next http.Handler) http.Handler {
 	}
 }
 
+// RequirePermission checks if the authenticated user has ALL required granular permissions
+func RequirePermission(requiredPermissions ...string) func(next http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Super admin bypasses all permission checks
+			if GetUserRole(r.Context()) == "admin" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			userPerms := GetUserPermissions(r.Context())
+			permMap := make(map[string]bool)
+			for _, p := range userPerms {
+				permMap[p] = true
+			}
+
+			for _, required := range requiredPermissions {
+				if !permMap[required] {
+					response.Forbidden(w, fmt.Sprintf("Forbidden: missing required permission '%s'", required), map[string]any{
+						"required_permissions": requiredPermissions,
+						"your_permissions":     userPerms,
+					})
+					return
+				}
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// RequireAnyPermission checks if the authenticated user has AT LEAST ONE of the listed permissions
+func RequireAnyPermission(permissions ...string) func(next http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if GetUserRole(r.Context()) == "admin" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			userPerms := GetUserPermissions(r.Context())
+			permMap := make(map[string]bool)
+			for _, p := range userPerms {
+				permMap[p] = true
+			}
+
+			for _, p := range permissions {
+				if permMap[p] {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+
+			response.Forbidden(w, "Forbidden: missing required permission", map[string]any{
+				"one_of_permissions": permissions,
+				"your_permissions":   userPerms,
+			})
+		})
+	}
+}
+
 func GetUserID(ctx context.Context) (uuid.UUID, error) {
 	val := ctx.Value(UserIDKey)
 	if val == nil {
@@ -129,4 +201,16 @@ func GetUserRole(ctx context.Context) string {
 		return ""
 	}
 	return role
+}
+
+func GetUserPermissions(ctx context.Context) []string {
+	val := ctx.Value(UserPermissionsKey)
+	if val == nil {
+		return []string{}
+	}
+	perms, ok := val.([]string)
+	if !ok {
+		return []string{}
+	}
+	return perms
 }

@@ -62,8 +62,33 @@ func (m *MockUserRepository) List(ctx context.Context, p pagination.Params, sear
 	return args.Get(0).([]*domain.User), args.Int(1), args.Error(2)
 }
 
+type MockRBACRepository struct {
+	mock.Mock
+}
+
+func (m *MockRBACRepository) GetPermissionsByRole(ctx context.Context, roleID string) ([]string, error) {
+	return []string{"users:read", "uploads:create"}, nil
+}
+
+func (m *MockRBACRepository) ListRoles(ctx context.Context) ([]domain.RoleWithPermissions, error) {
+	return nil, nil
+}
+
+func (m *MockRBACRepository) ListPermissions(ctx context.Context) ([]domain.Permission, error) {
+	return nil, nil
+}
+
+func (m *MockRBACRepository) AssignPermissionToRole(ctx context.Context, roleID, permissionID string) error {
+	return nil
+}
+
+func (m *MockRBACRepository) RevokePermissionFromRole(ctx context.Context, roleID, permissionID string) error {
+	return nil
+}
+
 func setupTest() (*MockUserRepository, *service.UserService) {
 	mockRepo := new(MockUserRepository)
+	mockRBAC := new(MockRBACRepository)
 	mockCache := cache.NewNoopCache()
 	mockMailer := mailer.NewLogMailer()
 	workerPool := worker.NewPool(1, 10)
@@ -73,7 +98,7 @@ func setupTest() (*MockUserRepository, *service.UserService) {
 			ExpireMinutes: 60,
 		},
 	}
-	userService := service.NewUserService(mockRepo, mockCache, workerPool, mockMailer, cfg)
+	userService := service.NewUserService(mockRepo, mockRBAC, mockCache, workerPool, mockMailer, cfg)
 	return mockRepo, userService
 }
 

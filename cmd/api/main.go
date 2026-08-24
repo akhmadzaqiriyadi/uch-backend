@@ -96,14 +96,16 @@ func main() {
 
 	// 5. Dependency Injection (Clean Architecture Wiring)
 	userRepo := postgres.NewUserRepository(dbPool)
-	userService := service.NewUserService(userRepo, cacheClient, workerPool, appMailer, cfg)
+	rbacRepo := postgres.NewRBACRepository(dbPool)
+	userService := service.NewUserService(userRepo, rbacRepo, cacheClient, workerPool, appMailer, cfg)
 	userHandler := handler.NewUserHandler(userService)
 	docsHandler := handler.NewDocsHandler()
 	healthHandler := handler.NewHealthHandler(cfg, dbPool, cacheClient)
 	uploadHandler := handler.NewUploadHandler(fileStorage)
+	rbacHandler := handler.NewRBACHandler(rbacRepo)
 
 	// 6. Router Setup
-	router := handler.NewRouter(cfg, logger, userHandler, docsHandler, healthHandler, uploadHandler)
+	router := handler.NewRouter(cfg, logger, userHandler, docsHandler, healthHandler, uploadHandler, rbacHandler)
 
 	// 7. HTTP Server Configuration
 	srv := &http.Server{

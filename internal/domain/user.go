@@ -25,7 +25,7 @@ type RegisterRequest struct {
 	Name     string `json:"name" validate:"required,min=2,max=100"`
 	Email    string `json:"email" validate:"required,email"`
 	Password string `json:"password" validate:"required,min=6,max=50"`
-	Role     string `json:"role,omitempty" validate:"omitempty,oneof=user admin"`
+	Role     string `json:"role,omitempty" validate:"omitempty,oneof=user manager admin"`
 }
 
 type LoginRequest struct {
@@ -48,12 +48,13 @@ type AuthResponse struct {
 }
 
 type UserResponse struct {
-	ID        uuid.UUID `json:"id"`
-	Name      string    `json:"name"`
-	Email     string    `json:"email"`
-	Role      string    `json:"role"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID          uuid.UUID `json:"id"`
+	Name        string    `json:"name"`
+	Email       string    `json:"email"`
+	Role        string    `json:"role"`
+	Permissions []string  `json:"permissions"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 type PaginatedUsersResponse struct {
@@ -61,14 +62,18 @@ type PaginatedUsersResponse struct {
 	Meta  pagination.Meta `json:"meta"`
 }
 
-func (u *User) ToResponse() UserResponse {
+func (u *User) ToResponse(permissions ...string) UserResponse {
+	if permissions == nil {
+		permissions = []string{}
+	}
 	return UserResponse{
-		ID:        u.ID,
-		Name:      u.Name,
-		Email:     u.Email,
-		Role:      u.Role,
-		CreatedAt: u.CreatedAt,
-		UpdatedAt: u.UpdatedAt,
+		ID:          u.ID,
+		Name:        u.Name,
+		Email:       u.Email,
+		Role:        u.Role,
+		Permissions: permissions,
+		CreatedAt:   u.CreatedAt,
+		UpdatedAt:   u.UpdatedAt,
 	}
 }
 
