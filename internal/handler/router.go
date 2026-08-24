@@ -62,6 +62,9 @@ func NewRouter(
 	// Static File Server for uploaded files
 	r.Handle("/uploads/*", http.StripPrefix("/uploads/", http.FileServer(http.Dir("./uploads"))))
 
+	// Go Runtime Profiler (/debug/pprof/* for CPU, heap, goroutine analysis)
+	r.Mount("/debug", chiMiddleware.Profiler())
+
 	// Comprehensive Health Check endpoint (Postgres, Redis, & System metrics)
 	r.Get("/healthz", healthHandler.Check)
 

@@ -12,6 +12,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/sync/singleflight"
 
 	"gozaq/config"
 	"gozaq/internal/domain"
@@ -22,11 +23,12 @@ import (
 )
 
 type UserService struct {
-	repo   domain.UserRepository
-	cache  cache.Cache
-	worker *worker.Pool
-	mailer mailer.Mailer
-	cfg    *config.Config
+	repo    domain.UserRepository
+	cache   cache.Cache
+	worker  *worker.Pool
+	mailer  mailer.Mailer
+	cfg     *config.Config
+	sfGroup singleflight.Group
 }
 
 type JWTClaims struct {
@@ -182,15 +184,23 @@ func (s *UserService) GetProfile(ctx context.Context, userID uuid.UUID) (*domain
 		return &cachedProfile, nil
 	}
 
-	user, err := s.repo.GetByID(ctx, userID)
+	// SingleFlight ensures only 1 concurrent DB query per cacheKey (prevents Cache Stampede)
+	v, err, _ := s.sfGroup.Do(cacheKey, func() (any, error) {
+		user, err := s.repo.GetByID(ctx, userID)
+		if err != nil {
+			return nil, err
+		}
+
+		resp := user.ToResponse()
+		_ = s.cache.Set(ctx, cacheKey, resp, 15*time.Minute)
+		return &resp, nil
+	})
+
 	if err != nil {
 		return nil, err
 	}
 
-	resp := user.ToResponse()
-	_ = s.cache.Set(ctx, cacheKey, resp, 15*time.Minute)
-
-	return &resp, nil
+	return v.(*domain.UserResponse), nil
 }
 
 func (s *UserService) UpdateProfile(ctx context.Context, userID uuid.UUID, req domain.UpdateProfileRequest) (*domain.UserResponse, error) {

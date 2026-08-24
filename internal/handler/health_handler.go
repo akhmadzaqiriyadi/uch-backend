@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"gozaq/config"
+	"gozaq/internal/handler/middleware"
 	"gozaq/pkg/cache"
 	"gozaq/pkg/response"
 )
@@ -94,6 +95,9 @@ func (h *HealthHandler) Check(w http.ResponseWriter, _ *http.Request) {
 		dbHealth.TotalConns = stats.TotalConns()
 		dbHealth.AcquiredConns = stats.AcquiredConns()
 		dbHealth.IdleConns = stats.IdleConns()
+
+		// Record PostgreSQL pool metrics to Prometheus
+		middleware.RecordDBPoolMetrics(h.db)
 	}
 
 	// 2. Check Cache Health (Redis)
