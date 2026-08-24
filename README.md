@@ -1,120 +1,201 @@
-# Go Backend Production-Grade Clean Architecture Template
+<div align="center">
 
-Template backend Golang standar industri berbasis **Clean Architecture**, **Redis Caching**, **RBAC**, **Token Rotation**, dan **Prometheus Observability**.
+# ⚡ Gozaq - Production-Grade Go Backend Boilerplate
+
+**An enterprise-grade, clean architecture Go backend boilerplate packed with PostgreSQL, Redis Caching, RBAC, Scalar OpenAPI Docs, Prometheus Observability, Rate Limiting, and Automated Testing.**
+
+[![Go Version](https://img.shields.io/badge/Go-1.25%2B-00ADD8?style=flat&logo=go)](https://golang.org)
+[![Clean Architecture](https://img.shields.io/badge/Architecture-Clean%20Arch-FF6B6B?style=flat)](https://blog.cleancoder.com)
+[![Scalar Docs](https://img.shields.io/badge/API%20Docs-Scalar%20UI-7C3AED?style=flat)](http://localhost:8080/docs)
+[![PostgreSQL](https://img.shields.io/badge/Database-PostgreSQL%20%2B%20pgx-336791?style=flat&logo=postgresql)](https://www.postgresql.org)
+[![Redis](https://img.shields.io/badge/Cache-Redis-DC382D?style=flat&logo=redis)](https://redis.io)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+</div>
 
 ---
 
-## 📁 Struktur Direktori & Layer
+## 🌟 Key Features
+
+* **🏛️ Clean & Layered Architecture**: Domain-driven separation of concerns (`domain` $\to$ `service` $\to$ `repository` $\to$ `handler`).
+* **🐘 High-Performance PostgreSQL**: Powered by `pgx/v5` with connection pooling, statement caching, and **automatic startup migrations** (`pkg/database/migrator.go`).
+* **⚡ Redis Cache-Aside & Token Rotation**: 
+  - Sub-millisecond user profile caching with automatic eviction on updates.
+  - Refresh Token Rotation & Instant Revocation (`Logout`).
+  - Seamless fallback to in-memory `NoopCache` if Redis is offline.
+* **🛡️ Enterprise Security**:
+  - **OWASP Security Headers** (Go's Helmet equivalent: CSP, HSTS, X-Frame-Options, No-Sniff).
+  - **IP-Based Token Bucket Rate Limiting** (Global 50 RPS / Auth 5 RPS anti brute-force).
+  - **Role-Based Access Control (RBAC)** (`admin` vs `user` roles).
+  - **Structured Panic Recovery** with stack-trace logging and unified JSON 500 responses.
+* **📖 Interactive Scalar API Reference (`/docs`)**: Modern, beautiful, interactive documentation embedded directly from OpenAPI 3.1 schema.
+* **📊 Observability & Diagnostics**:
+  - Comprehensive real-time system & dependency diagnostics (`GET /healthz` checking PostgreSQL, Redis, goroutines, memory, CPU).
+  - Prometheus metrics exporter (`GET /metrics`).
+  - Structured JSON logging (`log/slog`) with Request ID, latency, and HTTP status codes.
+* **📁 File Upload & Storage**:
+  - Multipart upload handler with MIME type sniffing (anti-spoofing) and 5MB size limit.
+  - Built-in static file server (`/uploads/*`).
+* **📧 Async Worker Pool & Mailer**:
+  - 5 concurrent background workers processing async tasks (e.g. welcome emails) with graceful drain on server shutdown.
+* **🌱 Database Seeder**: Instant database seeding (`make seed`) for default Admin (`admin@gozaq.com`) and sample users.
+* **🧪 Quality & Dev Tooling**:
+  - Git Pre-Commit Hook (auto formats with `gofmt`, runs `golangci-lint`, and executes `go test -race`).
+  - Live Hot-Reloading (`air`) via `make dev`.
+  - Comprehensive unit & HTTP integration tests with `testify/mock`.
+
+---
+
+## 🏗️ Project Architecture Layout
 
 ```text
 gozaq/
 ├── cmd/
-│   └── api/
-│       └── main.go                 # Entrypoint: Dependency Injection & Graceful Shutdown
-├── config/
-│   └── config.go                   # Environment configuration loader (.env & OS Env)
-├── internal/                       # Private code (Compiler-protected)
-│   ├── domain/                     # Core Business Entities & Interface Contracts
-│   │   ├── user.go                 # Models, DTOs (Auth, Register, CRUD), & Interfaces
-│   │   └── errors.go               # Standard Domain Errors
-│   ├── handler/                    # Transport Layer (HTTP)
-│   │   ├── router.go               # Chi router, Middleware, RBAC Guard, Prometheus
-│   │   ├── user_handler.go         # Controller HTTP (Auth & User CRUD)
-│   │   ├── docs_handler.go         # Scalar OpenAPI 3.1 Documentation UI Handler
-│   │   ├── openapi.json            # Embedded OpenAPI 3.1 Spec
-│   │   └── middleware/
-│   │       ├── auth.go             # JWT Authentication & RBAC RequireRole Guard
-│   │       ├── security_headers.go # OWASP Security Headers (Go's Helmet)
-│   │       ├── rate_limiter.go     # Token Bucket Rate Limiter per IP
-│   │       ├── logger.go           # Structured JSON slog request logger + Latency ms
-│   │       ├── recovery.go         # Structured Panic Recovery (Returns 500 JSON)
-│   │       └── metrics.go          # Prometheus HTTP Metrics Collector
-│   ├── service/                    # Business Logic Layer (Use cases, bcrypt, JWT, Cache)
-│   │   ├── user_service.go
-│   │   └── user_service_test.go    # Unit tests with Mock repository
-│   └── repository/                 # Data Access Layer
-│       └── postgres/
-│           └── user_repo.go        # PostgreSQL implementation using pgxpool
-├── pkg/                            # Reusable cross-project utilities
-│   ├── cache/                      # Redis Cache Layer (Cache-Aside + Noop fallback)
-│   ├── pagination/                 # Generic pagination, sorting, & metadata builder
-│   ├── response/                   # Standardized JSON response helper
-│   ├── validator/                  # Request payload validation helper
-│   └── worker/                     # Async Goroutine Worker Pool (Non-blocking tasks)
-├── migrations/                     # SQL database migration scripts
-│   ├── 000001_create_users_table.up.sql
-│   └── 000001_create_users_table.down.sql
-├── .github/workflows/ci.yml        # GitHub Actions CI/CD Pipeline
-├── .air.toml                       # Live hot-reloading configuration
-├── .golangci.yml                   # Strict linter configuration (0 issues)
-├── Dockerfile                      # Multi-stage production Alpine image
-├── docker-compose.yml              # PostgreSQL + Redis + API stack
-├── Makefile                        # Shortcuts for development tasks
-├── .env.example & .env             # Environment configuration
-├── go.mod & go.sum
-└── README.md
+│   ├── api/              # HTTP Server bootstrap & DI wiring
+│   └── seed/             # Database Seeder script (Admin & sample users)
+├── config/               # Environment & build metadata configuration
+├── docs/                 # OpenAPI 3.1 specification schema
+├── internal/
+│   ├── domain/           # Core Entities, DTOs, and Repository/Service Interfaces
+│   ├── handler/          # HTTP Handlers (User, Upload, Docs, Diagnostics)
+│   │   └── middleware/   # Auth (JWT & RBAC), Security Headers, Rate Limiter, Logger, Metrics, Recovery
+│   ├── repository/       # Data Access Layer (PostgreSQL with pgxpool & DBTX)
+│   └── service/          # Business Logic & Async Task Dispatchers
+├── migrations/           # SQL Migration files (.up.sql / .down.sql)
+├── pkg/
+│   ├── cache/            # Redis client & Noop fallback
+│   ├── database/         # Transactor (ACID transactions) & AutoMigrator
+│   ├── mailer/           # HTML Email Service
+│   ├── pagination/       # Request query parser & pagination metadata
+│   ├── response/         # Standard unified JSON response envelope (200, 201, 400, 401, 403, 404, 409, 422, 429, 500)
+│   ├── storage/          # Multipart file storage manager with MIME sniffing
+│   ├── validator/        # Struct payload validation (go-playground/validator)
+│   └── worker/           # Async Goroutine Worker Pool with graceful shutdown
+├── .air.toml             # Live hot-reload config
+├── .github/workflows/    # GitHub Actions CI pipeline
+├── .githooks/            # Git Pre-commit hook script
+├── .golangci.yml         # Strict GolangCI-Lint configuration (v2)
+├── docker-compose.yml    # Complete stack (Postgres + Redis + Go API)
+├── Dockerfile            # Multi-stage production container image
+└── Makefile              # Developer command suite
 ```
 
 ---
 
-## 🚀 Fitur Utama & Teknologi
+## 🚀 Quick Start Guide
 
-1. **Autentikasi Modern (Access Token + Refresh Token di Redis)**:
-   - Access Token (JWT 15 menit) untuk authorization cepat.
-   - Refresh Token (7 hari di Redis) dengan mekanisme **Token Rotation & Revocation (Logout)**.
-2. **Role-Based Access Control (RBAC)**:
-   - Role `user` dan `admin` yang dilindungi dengan `middleware.RequireRole("admin")`.
-3. **Redis Caching (Cache-Aside Pattern)**:
-   - Profil user otomatis dicache di Redis (15 menit) dan di-evict otomatis saat update / delete.
-   - Dilengkapi **Graceful Fallback (*NoopCache*)** jika Redis offline.
-4. **Asynchronous Background Worker Pool**:
-   - Menjalankan proses non-blocking (kirim email, analytics) via antrean goroutine pool.
-5. **Observability & Docs**:
-   - Interactive Docs: **Scalar UI** di `/docs`.
-   - Metrics: **Prometheus** di `/metrics`.
+### Prerequisites
+* **Go** 1.22+
+* **PostgreSQL** 14+ & **Redis** (or run via Docker)
 
----
+### 1. Clone & Setup Environment
+```bash
+git clone https://github.com/akhmadzaqiriyadi/gozaq.git
+cd gozaq
 
-## 📡 Daftar Endpoint API
+# Copy environment variables
+cp .env.example .env
+```
 
-| Method | Endpoint | Auth / Role | Deskripsi |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/docs` | Publik | **Scalar Interactive API Documentation UI** |
-| `GET` | `/openapi.json` | Publik | OpenAPI 3.1 Raw JSON |
-| `GET` | `/healthz` | Publik | Health check & Liveness probe |
-| `GET` | `/metrics` | Publik | Prometheus Metrics endpoint |
-| `POST` | `/api/v1/auth/register` | Publik | Registrasi user baru |
-| `POST` | `/api/v1/auth/login` | Publik | Login (kembalikan access + refresh token) |
-| `POST` | `/api/v1/auth/refresh` | Publik | Refresh token (Token Rotation) |
-| `POST` | `/api/v1/auth/logout` | Bearer Token | Logout & revoke refresh token di Redis |
-| `GET` | `/api/v1/auth/profile` | Bearer Token | Ambil profil user (Redis Cache-Aside) |
-| `PUT` | `/api/v1/auth/profile` | Bearer Token | Update data profil & auto-evict Redis |
-| `GET` | `/api/v1/users` | **Admin Only** | List semua user + pagination & search |
-| `DELETE` | `/api/v1/users/{id}` | **Admin Only** | Hapus user & invalidate cache |
+### 2. Install Git Pre-Commit Hooks
+```bash
+make hook-install
+```
+
+### 3. Seed Database (Optional)
+Populate database with default Admin (`admin@gozaq.com` / `Admin123!`) and sample users:
+```bash
+make seed
+```
+
+### 4. Run Development Server (with Live Hot-Reload)
+```bash
+make dev
+```
+The server will start on `http://localhost:8080`.
 
 ---
 
-## 🛠️ Perintah Terminal ([`Makefile`](file:///Users/zaq/gozaq/Makefile))
+## 🐳 Running with Docker Compose
+
+To launch the complete stack (PostgreSQL + Redis + API) in one command:
 
 ```bash
-# 1. Jalankan development server dengan LIVE HOT-RELOAD (Air)
-make dev
+# Start all services in background
+make docker-up
 
-# 2. Jalankan server biasa
-make run
+# View logs
+docker compose logs -f app
 
-# 3. Jalankan unit test dengan race detector & coverage
+# Stop services
+make docker-down
+```
+
+---
+
+## 📖 Interactive API Documentation
+
+Once the server is running, open your browser:
+👉 **[http://localhost:8080/docs](http://localhost:8080/docs)**
+
+Rendered by **Scalar UI**, you can test every endpoint directly from the browser, inspect exact JSON request/response schemas, and explore all status codes (`200`, `201`, `400`, `401`, `403`, `404`, `409`, `422`, `429`, `500`).
+
+---
+
+## 🛣️ API Endpoints Summary
+
+| Method | Endpoint | Description | Auth / Role |
+| :--- | :--- | :--- | :--- |
+| **`GET`** | `/healthz` | System & Dependencies Diagnostics | Public |
+| **`GET`** | `/metrics` | Prometheus Metrics Exporter | Public |
+| **`GET`** | `/docs` | Scalar Interactive API Reference | Public |
+| **`POST`** | `/api/v1/auth/register` | Register new account & generate tokens | Public (Rate Limited 5 RPS) |
+| **`POST`** | `/api/v1/auth/login` | Login with email & password | Public (Rate Limited 5 RPS) |
+| **`POST`** | `/api/v1/auth/refresh` | Refresh Access Token (Token Rotation) | Public |
+| **`POST`** | `/api/v1/auth/logout` | Logout & Revoke Redis Refresh Token | Bearer JWT |
+| **`GET`** | `/api/v1/auth/profile` | Get user profile (Redis Cached) | Bearer JWT |
+| **`PUT`** | `/api/v1/auth/profile` | Update profile & invalidate Redis cache | Bearer JWT |
+| **`POST`** | `/api/v1/uploads` | Upload avatar/file (JPEG/PNG/PDF max 5MB) | Bearer JWT |
+| **`GET`** | `/uploads/*` | Static file server for uploaded media | Public |
+| **`GET`** | `/api/v1/users` | List users with pagination & search | **Admin Only** |
+| **`DELETE`**| `/api/v1/users/{id}` | Delete user by UUID | **Admin Only** |
+
+---
+
+## 🛠️ Makefile Commands Reference
+
+| Command | Description |
+| :--- | :--- |
+| **`make dev`** | Runs server with live hot-reloading (`air`) |
+| **`make run`** | Runs server directly (`go run cmd/api/main.go`) |
+| **`make seed`** | Seeds database with Admin (`admin@gozaq.com`) & sample users |
+| **`make hook-install`** | Installs Git pre-commit hook in `.git/hooks` |
+| **`make build`** | Builds optimized binary with version & commit SHA metadata in `bin/api` |
+| **`make test`** | Runs unit & integration tests with race detector and coverage |
+| **`make lint`** | Runs `golangci-lint` with strict rules (0 issues) |
+| **`make fmt`** | Formats code with `gofmt` and `goimports` |
+| **`make audit`** | Scans dependencies with `govulncheck` (0 vulnerabilities) |
+| **`make tidy`** | Cleans and optimizes `go.mod` and `go.sum` |
+| **`make docker-up`** | Starts PostgreSQL, Redis, and API via Docker Compose |
+| **`make docker-down`**| Stops all Docker Compose containers |
+
+---
+
+## 🧪 Testing & Code Quality
+
+```bash
+# Run all tests with race detector and coverage
 make test
 
-# 4. Jalankan linter (golangci-lint)
+# Run linter
 make lint
 
-# 5. Format kode otomatis (Prettier Go)
-make fmt
-
-# 6. Jalankan Security Audit dependensi (govulncheck)
+# Run security vulnerability audit
 make audit
-
-# 7. Start container PostgreSQL + Redis + API
-make docker-up
 ```
+
+---
+
+## 📄 License
+
+This project is licensed under the **MIT License** - feel free to use it for your personal projects, startups, or enterprise applications!
