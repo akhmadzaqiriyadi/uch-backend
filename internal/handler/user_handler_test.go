@@ -84,6 +84,26 @@ func (m *MockUserService) ListUsers(ctx context.Context, p pagination.Params, se
 	return args.Get(0).(*domain.PaginatedUsersResponse), args.Error(1)
 }
 
+func (m *MockUserService) ForgotPassword(ctx context.Context, req domain.ForgotPasswordRequest) error {
+	args := m.Called(ctx, req)
+	return args.Error(0)
+}
+
+func (m *MockUserService) ResetPassword(ctx context.Context, req domain.ResetPasswordRequest) error {
+	args := m.Called(ctx, req)
+	return args.Error(0)
+}
+
+func (m *MockUserService) VerifyEmail(ctx context.Context, req domain.VerifyEmailRequest) error {
+	args := m.Called(ctx, req)
+	return args.Error(0)
+}
+
+func (m *MockUserService) ResendVerification(ctx context.Context, req domain.ResendVerificationRequest) error {
+	args := m.Called(ctx, req)
+	return args.Error(0)
+}
+
 func (m *MockUserService) DeleteUser(ctx context.Context, userID uuid.UUID) error {
 	args := m.Called(ctx, userID)
 	return args.Error(0)
@@ -190,5 +210,90 @@ func TestUserHandler_Login_Success(t *testing.T) {
 	err := json.Unmarshal(rec.Body.Bytes(), &resp)
 	assert.NoError(t, err)
 	assert.True(t, resp["success"].(bool))
+	mockService.AssertExpectations(t)
+}
+
+func TestUserHandler_ForgotPassword_Success(t *testing.T) {
+	mockService := new(MockUserService)
+	userHandler := handler.NewUserHandler(mockService)
+
+	reqBody := domain.ForgotPasswordRequest{
+		Email: "forgot@example.com",
+	}
+
+	mockService.On("ForgotPassword", mock.Anything, reqBody).Return(nil)
+
+	bodyBytes, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/forgot-password", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	userHandler.ForgotPassword(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	mockService.AssertExpectations(t)
+}
+
+func TestUserHandler_ResetPassword_Success(t *testing.T) {
+	mockService := new(MockUserService)
+	userHandler := handler.NewUserHandler(mockService)
+
+	reqBody := domain.ResetPasswordRequest{
+		Token:       "valid-reset-token",
+		NewPassword: "newsecretpassword123",
+	}
+
+	mockService.On("ResetPassword", mock.Anything, reqBody).Return(nil)
+
+	bodyBytes, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/reset-password", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	userHandler.ResetPassword(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	mockService.AssertExpectations(t)
+}
+
+func TestUserHandler_VerifyEmail_Success(t *testing.T) {
+	mockService := new(MockUserService)
+	userHandler := handler.NewUserHandler(mockService)
+
+	reqBody := domain.VerifyEmailRequest{
+		Token: "valid-verify-token",
+	}
+
+	mockService.On("VerifyEmail", mock.Anything, reqBody).Return(nil)
+
+	bodyBytes, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/verify-email", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	userHandler.VerifyEmail(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	mockService.AssertExpectations(t)
+}
+
+func TestUserHandler_ResendVerification_Success(t *testing.T) {
+	mockService := new(MockUserService)
+	userHandler := handler.NewUserHandler(mockService)
+
+	reqBody := domain.ResendVerificationRequest{
+		Email: "verify@example.com",
+	}
+
+	mockService.On("ResendVerification", mock.Anything, reqBody).Return(nil)
+
+	bodyBytes, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/resend-verification", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	userHandler.ResendVerification(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
 	mockService.AssertExpectations(t)
 }

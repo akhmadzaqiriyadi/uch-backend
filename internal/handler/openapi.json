@@ -59,6 +59,35 @@
         },
         "required": ["refresh_token"]
       },
+      "VerifyEmailRequest": {
+        "type": "object",
+        "properties": {
+          "token": { "type": "string", "example": "b489c9de7da29c308da460450ffb4d5d01f1ca558c7b30f14e700da0e934b908" }
+        },
+        "required": ["token"]
+      },
+      "ResendVerificationRequest": {
+        "type": "object",
+        "properties": {
+          "email": { "type": "string", "format": "email", "example": "zaq@example.com" }
+        },
+        "required": ["email"]
+      },
+      "ForgotPasswordRequest": {
+        "type": "object",
+        "properties": {
+          "email": { "type": "string", "format": "email", "example": "zaq@example.com" }
+        },
+        "required": ["email"]
+      },
+      "ResetPasswordRequest": {
+        "type": "object",
+        "properties": {
+          "token": { "type": "string", "example": "b489c9de7da29c308da460450ffb4d5d01f1ca558c7b30f14e700da0e934b908" },
+          "new_password": { "type": "string", "format": "password", "example": "NewSecureP@ss123", "minLength": 6 }
+        },
+        "required": ["token", "new_password"]
+      },
       "UpdateProfileRequest": {
         "type": "object",
         "properties": {
@@ -73,8 +102,23 @@
           "name": { "type": "string", "example": "Zaq Doe" },
           "email": { "type": "string", "format": "email", "example": "zaq@example.com" },
           "role": { "type": "string", "example": "user" },
+          "is_verified": { "type": "boolean", "example": true },
+          "verified_at": { "type": "string", "format": "date-time", "example": "2026-08-24T10:00:00Z" },
+          "permissions": { "type": "array", "items": { "type": "string" }, "example": ["users:read", "uploads:create"] },
           "created_at": { "type": "string", "format": "date-time", "example": "2026-08-24T10:00:00Z" },
           "updated_at": { "type": "string", "format": "date-time", "example": "2026-08-24T10:00:00Z" }
+        }
+      },
+      "AuditLogResponse": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid", "example": "550e8400-e29b-41d4-a716-446655440000" },
+          "user_id": { "type": "string", "format": "uuid", "example": "550e8400-e29b-41d4-a716-446655440000" },
+          "action": { "type": "string", "example": "user.login" },
+          "entity": { "type": "string", "example": "users" },
+          "entity_id": { "type": "string", "example": "550e8400-e29b-41d4-a716-446655440000" },
+          "details": { "type": "object" },
+          "created_at": { "type": "string", "format": "date-time", "example": "2026-08-24T10:00:00Z" }
         }
       },
       "AuthResponse": {
@@ -218,6 +262,8 @@
                       "name": "Zaq Doe",
                       "email": "zaq@example.com",
                       "role": "user",
+                      "is_verified": false,
+                      "permissions": ["uploads:create"],
                       "created_at": "2026-08-24T12:00:00.000Z",
                       "updated_at": "2026-08-24T12:00:00.000Z"
                     }
@@ -346,6 +392,9 @@
                       "name": "Zaq Doe",
                       "email": "zaq@example.com",
                       "role": "user",
+                      "is_verified": true,
+                      "verified_at": "2026-08-24T12:00:00.000Z",
+                      "permissions": ["uploads:create"],
                       "created_at": "2026-08-24T12:00:00.000Z",
                       "updated_at": "2026-08-24T12:00:00.000Z"
                     }
@@ -456,6 +505,9 @@
                       "name": "Zaq Doe",
                       "email": "zaq@example.com",
                       "role": "user",
+                      "is_verified": true,
+                      "verified_at": "2026-08-24T12:00:00.000Z",
+                      "permissions": ["uploads:create"],
                       "created_at": "2026-08-24T12:00:00.000Z",
                       "updated_at": "2026-08-24T12:00:00.000Z"
                     }
@@ -478,6 +530,127 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/verify-email": {
+      "post": {
+        "tags": ["Authentication"],
+        "summary": "Verify user email address",
+        "description": "Validates single-use email verification token from Redis and marks user account as verified in PostgreSQL.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/VerifyEmailRequest" },
+              "example": {
+                "token": "b489c9de7da29c308da460450ffb4d5d01f1ca558c7b30f14e700da0e934b908"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Email verified successfully",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": true,
+                  "status_code": 200,
+                  "message": "Email verified successfully! Your account is now fully active.",
+                  "timestamp": "2026-08-24T12:00:00.000Z"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or expired verification token"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/resend-verification": {
+      "post": {
+        "tags": ["Authentication"],
+        "summary": "Resend activation email link",
+        "description": "Generates a new verification token and sends activation email via background worker pool.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ResendVerificationRequest" },
+              "example": {
+                "email": "zaq@example.com"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Verification link sent if account is unverified"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/forgot-password": {
+      "post": {
+        "tags": ["Authentication"],
+        "summary": "Request Password Reset Link",
+        "description": "Generates a secure 32-byte crypto token in Redis (15m TTL) and sends password reset email without leaking user existence.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ForgotPasswordRequest" },
+              "example": {
+                "email": "zaq@example.com"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Reset instructions sent if email exists",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": true,
+                  "status_code": 200,
+                  "message": "If your email is registered, a password reset link has been sent",
+                  "timestamp": "2026-08-24T12:00:00.000Z"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/reset-password": {
+      "post": {
+        "tags": ["Authentication"],
+        "summary": "Set New Password with Reset Token",
+        "description": "Validates single-use reset token, hashes new password with bcrypt, updates DB, and revokes token.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ResetPasswordRequest" },
+              "example": {
+                "token": "b489c9de7da29c308da460450ffb4d5d01f1ca558c7b30f14e700da0e934b908",
+                "new_password": "BrandNewSecurePassword123!"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Password reset successful"
+          },
+          "401": {
+            "description": "Invalid or expired reset token"
           }
         }
       }
@@ -554,6 +727,9 @@
                     "name": "Zaq Doe",
                     "email": "zaq@example.com",
                     "role": "user",
+                    "is_verified": true,
+                    "verified_at": "2026-08-24T12:00:00.000Z",
+                    "permissions": ["uploads:create"],
                     "created_at": "2026-08-24T12:00:00.000Z",
                     "updated_at": "2026-08-24T12:00:00.000Z"
                   }
@@ -859,8 +1035,8 @@
     "/api/v1/users/{id}": {
       "delete": {
         "tags": ["Admin User Management"],
-        "summary": "Delete User by ID (Admin Role Required)",
-        "description": "Permanently deletes a user from PostgreSQL and removes their cached profile from Redis. Protected by RBAC RequireRole('admin').",
+        "summary": "Delete User by ID (Soft Delete, Admin Role Required)",
+        "description": "Soft deletes user by setting deleted_at timestamp in PostgreSQL and removes their cached profile from Redis. Protected by RBAC RequireRole('admin').",
         "security": [{ "bearerAuth": [] }],
         "parameters": [
           {
@@ -994,6 +1170,54 @@
                     "email": "jane@example.com",
                     "role": "manager",
                     "permissions": ["users:read", "users:update", "uploads:create", "audit:read"]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/audit-logs": {
+      "get": {
+        "tags": ["Audit Logs & Compliance"],
+        "summary": "List System Audit Logs",
+        "description": "Retrieves paginated audit trail logs of critical user activities. Protected by 'audit:read' permission.",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1 } },
+          { "name": "per_page", "in": "query", "schema": { "type": "integer", "default": 10 } },
+          { "name": "action", "in": "query", "schema": { "type": "string" }, "description": "Filter by action e.g. user.login, user.registered" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Audit logs retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/APIResponse" },
+                "example": {
+                  "success": true,
+                  "status_code": 200,
+                  "message": "Audit logs retrieved successfully",
+                  "timestamp": "2026-08-24T12:00:00.000Z",
+                  "data": {
+                    "logs": [
+                      {
+                        "id": "7bb7e29a-1123-44aa-9c12-001122334455",
+                        "user_id": "5ee63488-895b-45ab-94f3-afd14c92a551",
+                        "action": "user.login",
+                        "entity": "users",
+                        "entity_id": "5ee63488-895b-45ab-94f3-afd14c92a551",
+                        "details": { "email": "zaq@example.com" },
+                        "created_at": "2026-08-24T12:00:00.000Z"
+                      }
+                    ],
+                    "meta": {
+                      "current_page": 1,
+                      "per_page": 10,
+                      "total_items": 1,
+                      "total_pages": 1
+                    }
                   }
                 }
               }

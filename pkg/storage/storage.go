@@ -16,6 +16,7 @@ import (
 var (
 	ErrFileTooLarge    = errors.New("file size exceeds maximum allowed limit")
 	ErrInvalidFileType = errors.New("unsupported file type")
+	ErrFileNotFound    = errors.New("file not found")
 )
 
 type FileInfo struct {
@@ -27,14 +28,22 @@ type FileInfo struct {
 	MimeType     string `json:"mime_type"`
 }
 
-type Storage struct {
+// Storage is the abstraction for file storage backends (Local, S3, MinIO, GCS)
+type Storage interface {
+	SaveFile(header *multipart.FileHeader) (*FileInfo, error)
+	DeleteFile(filename string) error
+	GetURL(filename string) string
+}
+
+// LocalStorage implements Storage for the local file system
+type LocalStorage struct {
 	baseDir      string
 	baseURL      string
 	maxSize      int64
 	allowedMimes map[string]bool
 }
 
-func NewLocalStorage(baseDir, baseURL string, maxSizeBytes int64) *Storage {
+func NewLocalStorage(baseDir, baseURL string, maxSizeBytes int64) *LocalStorage {
 	_ = os.MkdirAll(baseDir, 0755)
 
 	allowedMimes := map[string]bool{
@@ -44,9 +53,10 @@ func NewLocalStorage(baseDir, baseURL string, maxSizeBytes int64) *Storage {
 		"image/gif":        true,
 		"application/pdf":  true,
 		"application/json": true,
+		"text/plain":       true,
 	}
 
-	return &Storage{
+	return &LocalStorage{
 		baseDir:      baseDir,
 		baseURL:      baseURL,
 		maxSize:      maxSizeBytes,
@@ -54,7 +64,7 @@ func NewLocalStorage(baseDir, baseURL string, maxSizeBytes int64) *Storage {
 	}
 }
 
-func (s *Storage) SaveFile(header *multipart.FileHeader) (*FileInfo, error) {
+func (s *LocalStorage) SaveFile(header *multipart.FileHeader) (*FileInfo, error) {
 	if header.Size > s.maxSize {
 		return nil, ErrFileTooLarge
 	}
@@ -74,6 +84,11 @@ func (s *Storage) SaveFile(header *multipart.FileHeader) (*FileInfo, error) {
 		return nil, fmt.Errorf("failed to read file header: %w", err)
 	}
 	mimeType := http.DetectContentType(buffer[:n])
+
+	// Strip parameters like charset from detected MIME
+	if idx := strings.Index(mimeType, ";"); idx != -1 {
+		mimeType = strings.TrimSpace(mimeType[:idx])
+	}
 
 	if !s.allowedMimes[mimeType] {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidFileType, mimeType)
@@ -109,8 +124,25 @@ func (s *Storage) SaveFile(header *multipart.FileHeader) (*FileInfo, error) {
 		OriginalName: header.Filename,
 		FileName:     uniqueName,
 		FilePath:     targetPath,
-		URL:          fmt.Sprintf("%s/%s", s.baseURL, uniqueName),
+		URL:          s.GetURL(uniqueName),
 		Size:         written,
 		MimeType:     mimeType,
 	}, nil
+}
+
+func (s *LocalStorage) DeleteFile(filename string) error {
+	// Prevent directory traversal
+	cleanName := filepath.Base(filename)
+	targetPath := filepath.Join(s.baseDir, cleanName)
+
+	if _, err := os.Stat(targetPath); os.IsNotExist(err) {
+		return ErrFileNotFound
+	}
+
+	return os.Remove(targetPath)
+}
+
+func (s *LocalStorage) GetURL(filename string) string {
+	cleanName := filepath.Base(filename)
+	return fmt.Sprintf("%s/%s", strings.TrimRight(s.baseURL, "/"), cleanName)
 }

@@ -23,6 +23,7 @@ func NewRouter(
 	healthHandler *HealthHandler,
 	uploadHandler *UploadHandler,
 	rbacHandler *RBACHandler,
+	auditHandler *AuditHandler,
 ) http.Handler {
 	r := chi.NewRouter()
 
@@ -50,13 +51,14 @@ func NewRouter(
 	// 6. Security: Global Rate Limiting
 	r.Use(globalLimiter.Limit())
 
-	// 7. CORS Configuration
+	// 7. Dynamic CORS Configuration
+	allowCredentials := len(cfg.CORS.AllowedOrigins) != 1 || cfg.CORS.AllowedOrigins[0] != "*"
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"*"},
+		AllowedOrigins:   cfg.CORS.AllowedOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
 		ExposedHeaders:   []string{"Link", "X-Request-ID", "X-Response-Time"},
-		AllowCredentials: true,
+		AllowCredentials: allowCredentials,
 		MaxAge:           300,
 	}))
 
@@ -86,6 +88,10 @@ func NewRouter(
 			r.Post("/auth/register", userHandler.Register)
 			r.Post("/auth/login", userHandler.Login)
 			r.Post("/auth/refresh", userHandler.RefreshToken)
+			r.Post("/auth/verify-email", userHandler.VerifyEmail)
+			r.Post("/auth/resend-verification", userHandler.ResendVerification)
+			r.Post("/auth/forgot-password", userHandler.ForgotPassword)
+			r.Post("/auth/reset-password", userHandler.ResetPassword)
 		})
 
 		// Protected Routes (Requires valid JWT Access Token)
@@ -109,6 +115,10 @@ func NewRouter(
 
 			r.With(middleware.RequirePermission("roles:manage")).
 				Put("/users/{id}/role", userHandler.UpdateUserRole)
+
+			// Audit Logs (Protected by PBAC: audit:read)
+			r.With(middleware.RequirePermission("audit:read")).
+				Get("/audit-logs", auditHandler.ListAuditLogs)
 
 			// Dynamic RBAC & PBAC Management (Admin Only / roles:manage)
 			r.Group(func(r chi.Router) {

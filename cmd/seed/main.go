@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/brianvoe/gofakeit/v7"
@@ -22,9 +24,28 @@ func main() {
 	slog.SetDefault(logger)
 
 	cfg := config.Load()
-	logger.Info("🌱 Starting database seeding with gofakeit realistic data...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	// Parse command line flags
+	envFlag := flag.String("env", cfg.App.Env, "Target environment mode: 'dev' or 'prod'")
+	adminEmailFlag := flag.String("email", cfg.Seed.AdminEmail, "Admin email address")
+	adminPassFlag := flag.String("password", cfg.Seed.AdminPassword, "Admin password")
+	forceFakeFlag := flag.Bool("force-fake-users", false, "Force generating 20 fake users even in production mode")
+	flag.Parse()
+
+	targetEnv := strings.ToLower(*envFlag)
+	if targetEnv == "development" {
+		targetEnv = "dev"
+	}
+	if targetEnv == "production" {
+		targetEnv = "prod"
+	}
+
+	logger.Info("🌱 Initializing Database Seeder",
+		slog.String("target_env", targetEnv),
+		slog.String("admin_email", *adminEmailFlag),
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	dbPool, err := pgxpool.New(ctx, cfg.Database.URL)
@@ -35,34 +56,61 @@ func main() {
 	defer dbPool.Close()
 
 	userRepo := postgres.NewUserRepository(dbPool)
-
-	// 1. Seed Default Admin User
-	adminPassword, _ := bcrypt.GenerateFromPassword([]byte("Admin123!"), bcrypt.DefaultCost)
 	now := time.Now().UTC()
 
+	// 1. Seed Initial Admin Account
+	adminPassword := *adminPassFlag
+	if len(adminPassword) < 8 {
+		logger.Error("Admin password must be at least 8 characters for security")
+		os.Exit(1)
+	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(adminPassword), bcrypt.DefaultCost)
+	if err != nil {
+		logger.Error("Failed to hash admin password", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+
 	adminUser := &domain.User{
-		ID:        uuid.New(),
-		Name:      "System Administrator",
-		Email:     "admin@gozaq.com",
-		Password:  string(adminPassword),
-		Role:      "admin",
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:         uuid.New(),
+		Name:       "System Administrator",
+		Email:      *adminEmailFlag,
+		Password:   string(hashedPassword),
+		Role:       "admin",
+		IsVerified: true,
+		VerifiedAt: &now,
+		CreatedAt:  now,
+		UpdatedAt:  now,
 	}
 
 	if err := userRepo.Create(ctx, adminUser); err != nil {
-		logger.Warn("Admin user already exists or skipped", slog.String("email", adminUser.Email))
+		logger.Warn("Admin user already exists in database (skipped creation)", slog.String("email", adminUser.Email))
 	} else {
-		logger.Info("👑 Admin user seeded successfully",
-			slog.String("email", adminUser.Email),
-			slog.String("role", adminUser.Role),
-			slog.String("password", "Admin123!"),
-		)
+		if targetEnv == "dev" {
+			logger.Info("👑 [DEV] Admin user seeded successfully",
+				slog.String("email", adminUser.Email),
+				slog.String("role", adminUser.Role),
+				slog.String("password", adminPassword),
+			)
+		} else {
+			logger.Info("👑 [PROD] Root Admin seeded successfully (Password hidden for security)",
+				slog.String("email", adminUser.Email),
+				slog.String("role", adminUser.Role),
+			)
+		}
 	}
 
-	// 2. Seed Realistic Sample Users using gofakeit
+	// 2. Production Security Gate: Prevent seeding fake data into production
+	if targetEnv == "prod" && !*forceFakeFlag {
+		logger.Info("🔒 Production mode active: Fake user generation strictly skipped for data safety.")
+		logger.Info("🎉 Initial production seeding completed successfully!")
+		return
+	}
+
+	// 3. Seed Realistic Sample Users using gofakeit (Dev Mode Only)
+	logger.Info("🎭 Generating 20 realistic fake users with gofakeit...")
 	_ = gofakeit.Seed(time.Now().UnixNano())
-	defaultPassword, _ := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.DefaultCost)
+	defaultUserPass, _ := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.DefaultCost)
 
 	totalUsers := 20
 	createdCount := 0
@@ -70,13 +118,15 @@ func main() {
 	for i := 0; i < totalUsers; i++ {
 		createdAt := gofakeit.DateRange(time.Now().AddDate(0, -3, 0), time.Now()).UTC()
 		u := &domain.User{
-			ID:        uuid.New(),
-			Name:      gofakeit.Name(),
-			Email:     gofakeit.Email(),
-			Password:  string(defaultPassword),
-			Role:      "user",
-			CreatedAt: createdAt,
-			UpdatedAt: createdAt,
+			ID:         uuid.New(),
+			Name:       gofakeit.Name(),
+			Email:      gofakeit.Email(),
+			Password:   string(defaultUserPass),
+			Role:       "user",
+			IsVerified: true,
+			VerifiedAt: &createdAt,
+			CreatedAt:  createdAt,
+			UpdatedAt:  createdAt,
 		}
 
 		if err := userRepo.Create(ctx, u); err != nil {

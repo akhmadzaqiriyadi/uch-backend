@@ -96,6 +96,94 @@ func (h *UserHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	response.OK(w, "Token refreshed successfully", authResp)
 }
 
+func (h *UserHandler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
+	var req domain.ForgotPasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.BadRequest(w, "Invalid JSON request payload", err.Error())
+		return
+	}
+
+	if errs := validator.ValidateStruct(req); len(errs) > 0 {
+		response.UnprocessableEntity(w, "Validation failed on request body", errs)
+		return
+	}
+
+	if err := h.userService.ForgotPassword(r.Context(), req); err != nil {
+		response.InternalServerError(w, "Failed to process forgot password request", err.Error())
+		return
+	}
+
+	response.OK(w, "If your email is registered, a password reset link has been sent", nil)
+}
+
+func (h *UserHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
+	var req domain.ResetPasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.BadRequest(w, "Invalid JSON request payload", err.Error())
+		return
+	}
+
+	if errs := validator.ValidateStruct(req); len(errs) > 0 {
+		response.UnprocessableEntity(w, "Validation failed on request body", errs)
+		return
+	}
+
+	if err := h.userService.ResetPassword(r.Context(), req); err != nil {
+		if errors.Is(err, domain.ErrUnauthorized) {
+			response.Unauthorized(w, "Invalid or expired reset token")
+			return
+		}
+		response.InternalServerError(w, "Failed to reset password", err.Error())
+		return
+	}
+
+	response.OK(w, "Password reset successfully. You can now login with your new password.", nil)
+}
+
+func (h *UserHandler) VerifyEmail(w http.ResponseWriter, r *http.Request) {
+	var req domain.VerifyEmailRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.BadRequest(w, "Invalid JSON request payload", err.Error())
+		return
+	}
+
+	if errs := validator.ValidateStruct(req); len(errs) > 0 {
+		response.UnprocessableEntity(w, "Validation failed on request body", errs)
+		return
+	}
+
+	if err := h.userService.VerifyEmail(r.Context(), req); err != nil {
+		if errors.Is(err, domain.ErrUnauthorized) {
+			response.Unauthorized(w, "Invalid or expired email verification token")
+			return
+		}
+		response.InternalServerError(w, "Failed to verify email", err.Error())
+		return
+	}
+
+	response.OK(w, "Email verified successfully! Your account is now fully active.", nil)
+}
+
+func (h *UserHandler) ResendVerification(w http.ResponseWriter, r *http.Request) {
+	var req domain.ResendVerificationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.BadRequest(w, "Invalid JSON request payload", err.Error())
+		return
+	}
+
+	if errs := validator.ValidateStruct(req); len(errs) > 0 {
+		response.UnprocessableEntity(w, "Validation failed on request body", errs)
+		return
+	}
+
+	if err := h.userService.ResendVerification(r.Context(), req); err != nil {
+		response.InternalServerError(w, "Failed to resend verification email", err.Error())
+		return
+	}
+
+	response.OK(w, "If the email is unverified, a new activation link has been sent.", nil)
+}
+
 func (h *UserHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	userID, err := middleware.GetUserID(r.Context())
 	if err != nil {

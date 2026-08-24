@@ -72,40 +72,51 @@ func main() {
 		}
 	}
 
-	// 2. Redis Cache Connection (with Noop fallback if unavailable)
+	// 2. Cache Connection (Redis or In-Memory Mock Driver)
 	var cacheClient cache.Cache
-	redisCache, err := cache.NewRedisCache(cfg.Redis.URL)
-	if err != nil {
-		logger.Warn("Redis unavailable, falling back to Noop in-memory cache", slog.String("error", err.Error()))
+	if cfg.Redis.Driver == "memory" || cfg.Redis.Driver == "noop" || cfg.Redis.Driver == "mock" {
+		logger.Info("⚡ In-Memory / Noop Cache Mock Driver active (Redis bypassed)")
 		cacheClient = cache.NewNoopCache()
 	} else {
-		logger.Info("Redis cache connection established successfully")
-		cacheClient = redisCache
-		defer func() {
-			_ = redisCache.Close()
-		}()
+		redisCache, err := cache.NewRedisCache(cfg.Redis.URL)
+		if err != nil {
+			logger.Warn("Redis unavailable, falling back to Noop in-memory cache", slog.String("error", err.Error()))
+			cacheClient = cache.NewNoopCache()
+		} else {
+			logger.Info("Redis cache connection established successfully")
+			cacheClient = redisCache
+			defer func() {
+				_ = redisCache.Close()
+			}()
+		}
 	}
 
 	// 3. Async Background Worker Pool (5 workers, 100 queue capacity)
 	workerPool := worker.NewPool(5, 100)
 	logger.Info("Async worker pool initialized (5 concurrent workers)")
 
-	// 4. Supporting Infrastructure: Mailer & Local Storage
-	appMailer := mailer.NewLogMailer()
-	fileStorage := storage.NewLocalStorage("./uploads", fmt.Sprintf("http://localhost:%s/uploads", cfg.App.Port), 5<<20) // 5MB limit
+	// 4. Supporting Infrastructure: Mailer & Cloud/Local Storage
+	appMailer := mailer.NewMailer(cfg)
+	fileStorage, err := storage.NewStorage(cfg)
+	if err != nil {
+		logger.Error("Failed to initialize file storage driver", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
 
 	// 5. Dependency Injection (Clean Architecture Wiring)
 	userRepo := postgres.NewUserRepository(dbPool)
 	rbacRepo := postgres.NewRBACRepository(dbPool)
-	userService := service.NewUserService(userRepo, rbacRepo, cacheClient, workerPool, appMailer, cfg)
+	auditRepo := postgres.NewAuditRepository(dbPool)
+	userService := service.NewUserService(userRepo, rbacRepo, auditRepo, cacheClient, workerPool, appMailer, cfg)
 	userHandler := handler.NewUserHandler(userService)
 	docsHandler := handler.NewDocsHandler()
 	healthHandler := handler.NewHealthHandler(cfg, dbPool, cacheClient)
 	uploadHandler := handler.NewUploadHandler(fileStorage)
 	rbacHandler := handler.NewRBACHandler(rbacRepo)
+	auditHandler := handler.NewAuditHandler(auditRepo)
 
 	// 6. Router Setup
-	router := handler.NewRouter(cfg, logger, userHandler, docsHandler, healthHandler, uploadHandler, rbacHandler)
+	router := handler.NewRouter(cfg, logger, userHandler, docsHandler, healthHandler, uploadHandler, rbacHandler, auditHandler)
 
 	// 7. HTTP Server Configuration
 	srv := &http.Server{

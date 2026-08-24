@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -23,13 +24,14 @@ import (
 )
 
 type UserService struct {
-	repo     domain.UserRepository
-	rbacRepo domain.RBACRepository
-	cache    cache.Cache
-	worker   *worker.Pool
-	mailer   mailer.Mailer
-	cfg      *config.Config
-	sfGroup  singleflight.Group
+	repo      domain.UserRepository
+	rbacRepo  domain.RBACRepository
+	auditRepo domain.AuditRepository
+	cache     cache.Cache
+	worker    *worker.Pool
+	mailer    mailer.Mailer
+	cfg       *config.Config
+	sfGroup   singleflight.Group
 }
 
 type JWTClaims struct {
@@ -43,18 +45,20 @@ type JWTClaims struct {
 func NewUserService(
 	repo domain.UserRepository,
 	rbacRepo domain.RBACRepository,
+	auditRepo domain.AuditRepository,
 	cache cache.Cache,
 	workerPool *worker.Pool,
 	mailer mailer.Mailer,
 	cfg *config.Config,
 ) *UserService {
 	return &UserService{
-		repo:     repo,
-		rbacRepo: rbacRepo,
-		cache:    cache,
-		worker:   workerPool,
-		mailer:   mailer,
-		cfg:      cfg,
+		repo:      repo,
+		rbacRepo:  rbacRepo,
+		auditRepo: auditRepo,
+		cache:     cache,
+		worker:    workerPool,
+		mailer:    mailer,
+		cfg:       cfg,
 	}
 }
 
@@ -76,13 +80,14 @@ func (s *UserService) Register(ctx context.Context, req domain.RegisterRequest) 
 
 	now := time.Now().UTC()
 	user := &domain.User{
-		ID:        uuid.New(),
-		Name:      req.Name,
-		Email:     req.Email,
-		Password:  string(hashedPassword),
-		Role:      role,
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:         uuid.New(),
+		Name:       req.Name,
+		Email:      req.Email,
+		Password:   string(hashedPassword),
+		Role:       role,
+		IsVerified: false,
+		CreatedAt:  now,
+		UpdatedAt:  now,
 	}
 
 	if err := s.repo.Create(ctx, user); err != nil {
@@ -96,10 +101,29 @@ func (s *UserService) Register(ctx context.Context, req domain.RegisterRequest) 
 		return nil, err
 	}
 
-	userEmail := user.Email
-	userName := user.Name
-	s.worker.Submit(func(ctx context.Context) error {
-		return s.mailer.SendWelcomeEmail(ctx, userEmail, userName)
+	// 1. Generate Email Verification Token
+	randomBytes := make([]byte, 32)
+	if _, err := rand.Read(randomBytes); err == nil {
+		verifyToken := hex.EncodeToString(randomBytes)
+		_ = s.cache.Set(ctx, fmt.Sprintf("email_verify:%s", verifyToken), user.ID.String(), 24*time.Hour)
+
+		userEmail := user.Email
+		userName := user.Name
+		s.worker.Submit(func(taskCtx context.Context) error {
+			baseURL := strings.TrimRight(s.cfg.App.BaseURL, "/")
+			if baseURL == "" {
+				baseURL = fmt.Sprintf("http://localhost:%s", s.cfg.App.Port)
+			}
+			verifyURL := fmt.Sprintf("%s/verify-email?token=%s", baseURL, verifyToken)
+			_ = s.mailer.SendWelcomeEmail(taskCtx, userEmail, userName)
+			return s.mailer.SendVerificationEmail(taskCtx, userEmail, verifyURL)
+		})
+	}
+
+	// Record audit log
+	s.logAudit(&user.ID, "user.registered", "users", user.ID.String(), map[string]string{
+		"email": user.Email,
+		"role":  user.Role,
 	})
 
 	return &domain.AuthResponse{
@@ -129,6 +153,11 @@ func (s *UserService) Login(ctx context.Context, req domain.LoginRequest) (*doma
 		return nil, err
 	}
 
+	// Record audit log
+	s.logAudit(&user.ID, "user.login", "users", user.ID.String(), map[string]string{
+		"email": user.Email,
+	})
+
 	return &domain.AuthResponse{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
@@ -137,7 +166,6 @@ func (s *UserService) Login(ctx context.Context, req domain.LoginRequest) (*doma
 }
 
 func (s *UserService) RefreshToken(ctx context.Context, req domain.RefreshTokenRequest) (*domain.AuthResponse, error) {
-	// 1. Look up refresh token in Redis
 	redisKey := fmt.Sprintf("refresh_token:%s", req.RefreshToken)
 	var userIDStr string
 	if err := s.cache.Get(ctx, redisKey, &userIDStr); err != nil {
@@ -154,12 +182,11 @@ func (s *UserService) RefreshToken(ctx context.Context, req domain.RefreshTokenR
 		return nil, domain.ErrUnauthorized
 	}
 
-	// 2. Token Rotation: Revoke old refresh token from Redis
+	// Token Rotation
 	_ = s.cache.Delete(ctx, redisKey)
 
 	permissions := s.getRolePermissions(ctx, user.Role)
 
-	// 3. Issue brand new Access Token & Refresh Token
 	accessToken, refreshToken, err := s.issueTokens(ctx, user, permissions)
 	if err != nil {
 		return nil, err
@@ -172,12 +199,121 @@ func (s *UserService) RefreshToken(ctx context.Context, req domain.RefreshTokenR
 	}, nil
 }
 
+func (s *UserService) VerifyEmail(ctx context.Context, req domain.VerifyEmailRequest) error {
+	redisKey := fmt.Sprintf("email_verify:%s", req.Token)
+	var userIDStr string
+	if err := s.cache.Get(ctx, redisKey, &userIDStr); err != nil {
+		return domain.ErrUnauthorized
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return domain.ErrUnauthorized
+	}
+
+	if err := s.repo.SetEmailVerified(ctx, userID); err != nil {
+		return fmt.Errorf("failed to mark email as verified: %w", err)
+	}
+
+	_ = s.cache.Delete(ctx, redisKey)
+	_ = s.cache.Delete(ctx, fmt.Sprintf("user:profile:%s", userID.String()))
+
+	s.logAudit(&userID, "user.email_verified", "users", userID.String(), nil)
+	return nil
+}
+
+func (s *UserService) ResendVerification(ctx context.Context, req domain.ResendVerificationRequest) error {
+	user, err := s.repo.GetByEmail(ctx, req.Email)
+	if err != nil || user.IsVerified {
+		return nil
+	}
+
+	randomBytes := make([]byte, 32)
+	if _, err := rand.Read(randomBytes); err != nil {
+		return fmt.Errorf("failed to generate verification token: %w", err)
+	}
+	verifyToken := hex.EncodeToString(randomBytes)
+
+	_ = s.cache.Set(ctx, fmt.Sprintf("email_verify:%s", verifyToken), user.ID.String(), 24*time.Hour)
+
+	userEmail := user.Email
+	if s.worker != nil && s.mailer != nil {
+		s.worker.Submit(func(taskCtx context.Context) error {
+			baseURL := strings.TrimRight(s.cfg.App.BaseURL, "/")
+			if baseURL == "" {
+				baseURL = fmt.Sprintf("http://localhost:%s", s.cfg.App.Port)
+			}
+			verifyURL := fmt.Sprintf("%s/verify-email?token=%s", baseURL, verifyToken)
+			return s.mailer.SendVerificationEmail(taskCtx, userEmail, verifyURL)
+		})
+	}
+
+	return nil
+}
+
+func (s *UserService) ForgotPassword(ctx context.Context, req domain.ForgotPasswordRequest) error {
+	user, err := s.repo.GetByEmail(ctx, req.Email)
+	if err != nil {
+		return nil
+	}
+
+	randomBytes := make([]byte, 32)
+	if _, err := rand.Read(randomBytes); err != nil {
+		return fmt.Errorf("failed to generate reset token: %w", err)
+	}
+	resetToken := hex.EncodeToString(randomBytes)
+
+	redisKey := fmt.Sprintf("password_reset:%s", resetToken)
+	if err := s.cache.Set(ctx, redisKey, user.ID.String(), 15*time.Minute); err != nil {
+		slog.Warn("Failed to cache password reset token", slog.String("error", err.Error()))
+	}
+
+	if s.worker != nil && s.mailer != nil {
+		s.worker.Submit(func(taskCtx context.Context) error {
+			baseURL := strings.TrimRight(s.cfg.App.BaseURL, "/")
+			if baseURL == "" {
+				baseURL = fmt.Sprintf("http://localhost:%s", s.cfg.App.Port)
+			}
+			resetURL := fmt.Sprintf("%s/reset-password?token=%s", baseURL, resetToken)
+			return s.mailer.SendPasswordResetEmail(taskCtx, user.Email, resetURL)
+		})
+	}
+
+	return nil
+}
+
+func (s *UserService) ResetPassword(ctx context.Context, req domain.ResetPasswordRequest) error {
+	redisKey := fmt.Sprintf("password_reset:%s", req.Token)
+	var userIDStr string
+	if err := s.cache.Get(ctx, redisKey, &userIDStr); err != nil {
+		return domain.ErrUnauthorized
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return domain.ErrUnauthorized
+	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("failed to hash password: %w", err)
+	}
+
+	if err := s.repo.UpdatePassword(ctx, userID, string(hashedPassword)); err != nil {
+		return fmt.Errorf("failed to update password: %w", err)
+	}
+
+	_ = s.cache.Delete(ctx, redisKey)
+	_ = s.cache.Delete(ctx, fmt.Sprintf("user:profile:%s", userID.String()))
+
+	s.logAudit(&userID, "user.password_reset", "users", userID.String(), nil)
+	return nil
+}
+
 func (s *UserService) Logout(ctx context.Context, userID uuid.UUID, refreshToken string) error {
-	// Revoke refresh token
 	if refreshToken != "" {
 		_ = s.cache.Delete(ctx, fmt.Sprintf("refresh_token:%s", refreshToken))
 	}
-	// Evict user profile cache
 	_ = s.cache.Delete(ctx, fmt.Sprintf("user:profile:%s", userID.String()))
 	return nil
 }
@@ -191,7 +327,6 @@ func (s *UserService) GetProfile(ctx context.Context, userID uuid.UUID) (*domain
 		return &cachedProfile, nil
 	}
 
-	// SingleFlight ensures only 1 concurrent DB query per cacheKey (prevents Cache Stampede)
 	v, err, _ := s.sfGroup.Do(cacheKey, func() (any, error) {
 		user, err := s.repo.GetByID(ctx, userID)
 		if err != nil {
@@ -224,7 +359,6 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID uuid.UUID, req d
 		return nil, err
 	}
 
-	// Invalidate Redis profile cache
 	_ = s.cache.Delete(ctx, fmt.Sprintf("user:profile:%s", userID.String()))
 
 	permissions := s.getRolePermissions(ctx, user.Role)
@@ -245,8 +379,11 @@ func (s *UserService) UpdateUserRole(ctx context.Context, userID uuid.UUID, role
 	user.Role = role
 	user.UpdatedAt = time.Now().UTC()
 
-	// Invalidate Redis profile cache
 	_ = s.cache.Delete(ctx, fmt.Sprintf("user:profile:%s", userID.String()))
+
+	s.logAudit(&userID, "user.role_updated", "users", userID.String(), map[string]string{
+		"new_role": role,
+	})
 
 	permissions := s.getRolePermissions(ctx, role)
 	resp := user.ToResponse(permissions...)
@@ -277,9 +414,28 @@ func (s *UserService) DeleteUser(ctx context.Context, userID uuid.UUID) error {
 		return err
 	}
 
-	// Invalidate cache
 	_ = s.cache.Delete(ctx, fmt.Sprintf("user:profile:%s", userID.String()))
+
+	s.logAudit(&userID, "user.deleted", "users", userID.String(), nil)
 	return nil
+}
+
+func (s *UserService) logAudit(userID *uuid.UUID, action, entity, entityID string, details any) {
+	if s.auditRepo == nil || s.worker == nil {
+		return
+	}
+	logEntry := &domain.AuditLog{
+		ID:        uuid.New(),
+		UserID:    userID,
+		Action:    action,
+		Entity:    entity,
+		EntityID:  entityID,
+		Details:   details,
+		CreatedAt: time.Now().UTC(),
+	}
+	s.worker.Submit(func(taskCtx context.Context) error {
+		return s.auditRepo.Create(taskCtx, logEntry)
+	})
 }
 
 func (s *UserService) getRolePermissions(ctx context.Context, roleID string) []string {
@@ -304,7 +460,6 @@ func (s *UserService) getRolePermissions(ctx context.Context, roleID string) []s
 }
 
 func (s *UserService) issueTokens(ctx context.Context, user *domain.User, permissions []string) (string, string, error) {
-	// 1. Generate Access Token (15 Minutes) with Role and Granular Permissions
 	claims := JWTClaims{
 		UserID:      user.ID,
 		Email:       user.Email,
@@ -323,14 +478,12 @@ func (s *UserService) issueTokens(ctx context.Context, user *domain.User, permis
 		return "", "", fmt.Errorf("failed to generate access token: %w", err)
 	}
 
-	// 2. Generate Refresh Token (Random 32-byte hex string)
 	randomBytes := make([]byte, 32)
 	if _, err := rand.Read(randomBytes); err != nil {
 		return "", "", fmt.Errorf("failed to generate refresh token: %w", err)
 	}
 	refreshToken := hex.EncodeToString(randomBytes)
 
-	// 3. Store Refresh Token in Redis with 7 days TTL
 	redisKey := fmt.Sprintf("refresh_token:%s", refreshToken)
 	if err := s.cache.Set(ctx, redisKey, user.ID.String(), 7*24*time.Hour); err != nil {
 		slog.Warn("Failed to cache refresh token in Redis", slog.String("error", err.Error()))

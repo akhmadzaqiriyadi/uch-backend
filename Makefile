@@ -17,9 +17,15 @@ hook-install:
 	chmod +x .githooks/pre-commit
 	git config core.hooksPath .githooks
 
-# Run database seeder (Admin & sample users)
-seed:
-	go run cmd/seed/main.go
+# Run database seeder in Development mode (Admin + 20 sample users)
+seed: seed-dev
+
+seed-dev:
+	go run cmd/seed/main.go -env=dev
+
+# Run database seeder in Production mode (Root Admin only, no fake users)
+seed-prod:
+	go run cmd/seed/main.go -env=prod
 
 # Build binary with metadata
 build:

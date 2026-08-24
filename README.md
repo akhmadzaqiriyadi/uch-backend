@@ -32,30 +32,48 @@
   - **Permission Guards**: `middleware.RequirePermission("users:delete")` and `middleware.RequireAnyPermission(...)`.
   - **Dynamic Role Assignment Endpoint**: `PUT /api/v1/users/{id}/role` (instantly recalculates permissions & evicts cache).
   - Sub-millisecond Redis permission caching (`role:permissions:<role_id>`).
+* **📜 Audit Trail & Activity Logging**:
+  - PostgreSQL indexed table & repository recording security-critical events (`user.login`, `user.registered`, `user.email_verified`, `user.role_updated`, `user.password_reset`, `user.deleted`).
+  - Asynchronous log dispatching via `worker.Pool` (0ms HTTP latency penalty).
+  - Dedicated endpoint `GET /api/v1/audit-logs` guarded by `audit:read`.
+* **✉️ Email Verification & Activation**:
+  - `POST /api/v1/auth/verify-email` & `POST /api/v1/auth/resend-verification`.
+  - 32-byte crypto activation tokens stored in Redis with 24-hour TTL and instant profile cache invalidation.
+* **🗑️ Soft Delete Support (`deleted_at`)**:
+  - Safe data lifecycle management: `DELETE /api/v1/users/{id}` timestamps `deleted_at` to protect historical audit data from accidental loss.
+* **🔑 Secure Password Reset & Token Management**:
+  - `POST /api/v1/auth/forgot-password` & `POST /api/v1/auth/reset-password`.
+  - Cryptographically secure 32-byte tokens (`crypto/rand`) stored in Redis with 15-minute TTL and single-use revocation.
 * **🛡️ SingleFlight (`golang.org/x/sync/singleflight`) - Anti Cache Stampede**:
   - Eliminates the *Thundering Herd* problem when cache expires under high load by deduplicating concurrent database queries.
-* **🔒 Redis Distributed Stack**:
+* **🔒 Redis Distributed Stack & Mock Driver**:
   - **Cache-Aside Engine**: Sub-millisecond profile caching with automatic cache invalidation.
+  - **Pluggable Driver Flag (`CACHE_DRIVER=redis` / `memory`)**: Offline mock driver bypassing Redis without code changes.
   - **Token Rotation & Revocation**: Instant token invalidation on logout.
   - **Distributed Lock (`pkg/cache/lock.go`)**: Multi-instance mutex with atomic Lua release scripts (prevents double-spending / race conditions).
   - **Distributed Sliding-Window Rate Limiter (`pkg/cache/rate_limiter.go`)**: Cluster-wide rate limiting via Redis ZSETs.
 * **🔌 Go Runtime Profiler (`/debug/pprof`)**: Built-in endpoints for real-time CPU flamegraphs, heap memory analysis, and goroutine leak detection.
 * **⚡ Resilient Circuit Breaker (`pkg/resilience/circuit_breaker.go`)**: Protects the application against cascading failures from third-party APIs / external services.
-* **🛡️ Security & Guarding**:
+* **🛡️ Enterprise Security & Guarding**:
   - **OWASP Security Headers** (Go's Helmet: CSP, HSTS, X-Frame-Options, No-Sniff).
+  - **Dynamic CORS**: Configurable via `CORS_ALLOWED_ORIGINS` with credential validation.
+  - **SMTP Anti-CRLF / Header Injection** sanitization & HTML template contextual auto-escaping.
+  - **Anti-Host Header Poisoning** using immutable server configuration base URLs.
   - **Structured Panic Recovery** logging full stack-traces with unified JSON 500 responses.
 * **📖 Interactive Scalar API Reference (`/docs`)**: Modern, interactive documentation embedded directly from OpenAPI 3.1 schema.
 * **📊 Observability & Diagnostics**:
   - Real-time diagnostics endpoint (`GET /healthz` checking PostgreSQL, Redis, goroutines, RAM alloc, CPU cores, uptime).
   - Prometheus metrics exporter (`GET /metrics`) with HTTP latency histograms and PostgreSQL connection pool gauges.
   - Structured JSON logging (`log/slog`) exposing `X-Request-ID` and `X-Response-Time` headers.
-* **📁 File Upload & Static Storage**: Multipart upload handler with MIME type sniffing (anti-spoofing) and 5MB size limit.
-* **📧 Async Worker Pool & Mailer**: 5 concurrent background workers processing async tasks with graceful drain on server shutdown.
-* **🎭 Realistic Faker Database Seeder**: Powered by `gofakeit/v7` (`make seed`) to seed default Admin (`admin@gozaq.com`) + 20 sample users.
-* **🧪 Quality & Dev Tooling**:
+* **📁 Modular Storage System (Local & Cloud S3 / R2 / MinIO)**: Clean `Storage` interface with plug-and-play drivers for local disk (`LocalStorage`) and multi-cloud object storage (`S3Storage` for AWS S3, Cloudflare R2, MinIO, DigitalOcean Spaces) featuring magic-byte MIME sniffing anti-spoofing and configurable size limits.
+* **📧 Async Worker Pool & Hardened Mailer**: 5 concurrent background workers processing async tasks with graceful task draining on server shutdown, supporting `MAILER_DRIVER=log` (stdout preview) or `smtp`.
+* **🎭 Safe Dev & Production Database Seeder**:
+  - `make seed-dev`: Seeds default Admin (`admin@gozaq.com`) + 20 realistic fake users using `gofakeit/v7`.
+  - `make seed-prod`: Safely initializes initial Root Admin from environment variables with production fake-data locks.
+* **🧪 100% Tested Quality Suite**:
+  - Complete unit test suite with 0 race conditions across all packages (`pkg/`, `internal/`, `middleware`, `handlers`).
   - Git Pre-Commit Hook (auto formats with `gofmt`, runs `golangci-lint`, and executes `go test -race`).
   - Live Hot-Reloading (`air`) via `make dev`.
-  - Comprehensive unit & HTTP integration tests with `testify/mock`.
 
 ---
 
@@ -180,6 +198,10 @@ Once the server is running, open your browser:
 | **`POST`** | `/api/v1/auth/register` | Register new account & generate tokens | Public (5 RPS) |
 | **`POST`** | `/api/v1/auth/login` | Login with email & password | Public (5 RPS) |
 | **`POST`** | `/api/v1/auth/refresh` | Refresh Access Token (Token Rotation) | Public |
+| **`POST`** | `/api/v1/auth/verify-email` | Verify account with email activation token | Public (5 RPS) |
+| **`POST`** | `/api/v1/auth/resend-verification` | Resend verification email link | Public (5 RPS) |
+| **`POST`** | `/api/v1/auth/forgot-password` | Request password reset token via email | Public (5 RPS) |
+| **`POST`** | `/api/v1/auth/reset-password` | Set new password with secure reset token | Public (5 RPS) |
 | **`POST`** | `/api/v1/auth/logout` | Logout & Revoke Redis Refresh Token | Bearer JWT |
 | **`GET`** | `/api/v1/auth/profile` | Get user profile with permissions | Bearer JWT |
 | **`PUT`** | `/api/v1/auth/profile` | Update profile & invalidate Redis cache | Bearer JWT |
@@ -188,6 +210,7 @@ Once the server is running, open your browser:
 | **`GET`** | `/api/v1/users` | List users with pagination & search | `users:read` |
 | **`PUT`** | `/api/v1/users/{id}/role` | Update user role dynamically | `roles:manage` |
 | **`DELETE`**| `/api/v1/users/{id}` | Delete user by UUID | `users:delete` |
+| **`GET`** | `/api/v1/audit-logs` | Retrieve paginated system audit trail | `audit:read` |
 | **`GET`** | `/api/v1/roles` | List all system roles & permissions | `roles:read` |
 | **`GET`** | `/api/v1/permissions` | List all master system permissions | `roles:read` |
 | **`POST`** | `/api/v1/roles/{role_id}/permissions/{permission_id}` | Assign permission to role | `roles:manage` |
@@ -201,7 +224,8 @@ Once the server is running, open your browser:
 | :--- | :--- |
 | **`make dev`** | Runs server with live hot-reloading (`air`) |
 | **`make run`** | Runs server directly (`go run cmd/api/main.go`) |
-| **`make seed`** | Seeds database with Admin & 20 sample users using `gofakeit` |
+| **`make seed`** / **`make seed-dev`** | Seeds database in Dev mode (Admin & 20 sample users with `gofakeit`) |
+| **`make seed-prod`** | Safely seeds initial Root Admin in Production (no fake users) |
 | **`make hook-install`** | Installs Git pre-commit hook in `.git/hooks` |
 | **`make build`** | Builds optimized binary with version & commit SHA metadata in `bin/api` |
 | **`make test`** | Runs unit & integration tests with race detector and coverage |

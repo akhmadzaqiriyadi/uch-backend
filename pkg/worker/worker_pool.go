@@ -39,20 +39,12 @@ func (p *Pool) start() {
 		p.wg.Add(1)
 		go func(workerID int) {
 			defer p.wg.Done()
-			for {
-				select {
-				case <-p.ctx.Done():
-					return
-				case task, ok := <-p.tasks:
-					if !ok {
-						return
-					}
-					if err := task(p.ctx); err != nil {
-						slog.Error("Background task execution failed",
-							slog.Int("worker_id", workerID),
-							slog.String("error", err.Error()),
-						)
-					}
+			for task := range p.tasks {
+				if err := task(p.ctx); err != nil {
+					slog.Error("Background task execution failed",
+						slog.Int("worker_id", workerID),
+						slog.String("error", err.Error()),
+					)
 				}
 			}
 		}(i + 1)
@@ -72,7 +64,7 @@ func (p *Pool) Submit(task Task) bool {
 
 // Shutdown gracefully waits for ongoing tasks and stops workers
 func (p *Pool) Shutdown() {
-	p.cancel()
 	close(p.tasks)
 	p.wg.Wait()
+	p.cancel()
 }

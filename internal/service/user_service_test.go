@@ -49,8 +49,18 @@ func (m *MockUserRepository) Update(ctx context.Context, user *domain.User) erro
 	return args.Error(0)
 }
 
+func (m *MockUserRepository) UpdatePassword(ctx context.Context, id uuid.UUID, hashedPassword string) error {
+	args := m.Called(ctx, id, hashedPassword)
+	return args.Error(0)
+}
+
 func (m *MockUserRepository) UpdateRole(ctx context.Context, id uuid.UUID, role string) error {
 	args := m.Called(ctx, id, role)
+	return args.Error(0)
+}
+
+func (m *MockUserRepository) SetEmailVerified(ctx context.Context, id uuid.UUID) error {
+	args := m.Called(ctx, id)
 	return args.Error(0)
 }
 
@@ -91,9 +101,22 @@ func (m *MockRBACRepository) RevokePermissionFromRole(ctx context.Context, roleI
 	return nil
 }
 
+type MockAuditRepository struct {
+	mock.Mock
+}
+
+func (m *MockAuditRepository) Create(ctx context.Context, log *domain.AuditLog) error {
+	return nil
+}
+
+func (m *MockAuditRepository) List(ctx context.Context, p pagination.Params, action string) ([]domain.AuditLog, int, error) {
+	return nil, 0, nil
+}
+
 func setupTest() (*MockUserRepository, *service.UserService) {
 	mockRepo := new(MockUserRepository)
 	mockRBAC := new(MockRBACRepository)
+	mockAudit := new(MockAuditRepository)
 	mockCache := cache.NewNoopCache()
 	mockMailer := mailer.NewLogMailer()
 	workerPool := worker.NewPool(1, 10)
@@ -103,7 +126,7 @@ func setupTest() (*MockUserRepository, *service.UserService) {
 			ExpireMinutes: 60,
 		},
 	}
-	userService := service.NewUserService(mockRepo, mockRBAC, mockCache, workerPool, mockMailer, cfg)
+	userService := service.NewUserService(mockRepo, mockRBAC, mockAudit, mockCache, workerPool, mockMailer, cfg)
 	return mockRepo, userService
 }
 
@@ -160,5 +183,48 @@ func TestUserService_Login_Success(t *testing.T) {
 	assert.NotEmpty(t, resp.AccessToken)
 	assert.NotEmpty(t, resp.RefreshToken)
 	assert.Equal(t, user.Email, resp.User.Email)
+	mockRepo.AssertExpectations(t)
+}
+
+func TestUserService_ForgotPassword(t *testing.T) {
+	mockRepo, userService := setupTest()
+	ctx := context.Background()
+
+	user := &domain.User{
+		ID:        uuid.New(),
+		Name:      "Forgot User",
+		Email:     "forgot@example.com",
+		Role:      "user",
+		CreatedAt: time.Now(),
+	}
+
+	mockRepo.On("GetByEmail", ctx, "forgot@example.com").Return(user, nil)
+
+	err := userService.ForgotPassword(ctx, domain.ForgotPasswordRequest{
+		Email: "forgot@example.com",
+	})
+	assert.NoError(t, err)
+	mockRepo.AssertExpectations(t)
+}
+
+func TestUserService_ResendVerification(t *testing.T) {
+	mockRepo, userService := setupTest()
+	ctx := context.Background()
+
+	user := &domain.User{
+		ID:         uuid.New(),
+		Name:       "Verify User",
+		Email:      "verify@example.com",
+		Role:       "user",
+		IsVerified: false,
+		CreatedAt:  time.Now(),
+	}
+
+	mockRepo.On("GetByEmail", ctx, "verify@example.com").Return(user, nil)
+
+	err := userService.ResendVerification(ctx, domain.ResendVerificationRequest{
+		Email: "verify@example.com",
+	})
+	assert.NoError(t, err)
 	mockRepo.AssertExpectations(t)
 }
