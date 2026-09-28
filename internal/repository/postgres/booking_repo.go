@@ -246,7 +246,8 @@ func (r *BookingRepository) CheckConflict(
 	db := database.GetDBTX(ctx, r.db)
 	query := `
 		SELECT id, user_id, room_id, room_name, applicant_name, applicant_role,
-		       id_number, prodi, purpose, audience, booking_date, start_time,
+		       COALESCE(id_number, ''), COALESCE(prodi, ''), purpose, audience,
+		       to_char(booking_date, 'YYYY-MM-DD'), start_time,
 		       end_time, status, admin_notes, created_at, updated_at
 		FROM bookings
 		WHERE room_id = $1
@@ -290,12 +291,13 @@ func (r *BookingRepository) GetOccupiedSlots(ctx context.Context, roomID string,
 	db := database.GetDBTX(ctx, r.db)
 	query := `
 		SELECT id, user_id, room_id, room_name, applicant_name, applicant_role,
-		       id_number, prodi, purpose, audience, booking_date, start_time,
+		       COALESCE(id_number, ''), COALESCE(prodi, ''), purpose, audience,
+		       to_char(booking_date, 'YYYY-MM-DD'), start_time,
 		       end_time, status, admin_notes, created_at, updated_at
 		FROM bookings
-		WHERE room_id = $1
+		WHERE ($1 = '' OR room_id = $1)
 		  AND booking_date = $2
-		  AND status IN ('approved', 'completed')
+		  AND status IN ('pending', 'approved', 'completed')
 		ORDER BY start_time ASC
 	`
 	rows, err := db.Query(ctx, query, roomID, date)

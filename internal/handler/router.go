@@ -107,6 +107,7 @@ func NewRouter(
 
 		// Public Rooms catalog
 		r.Get("/rooms", roomHandler.ListRooms)
+		r.Get("/rooms/occupied-slots", bookingHandler.GetOccupiedSlots)
 		r.Get("/rooms/{id}", roomHandler.GetRoom)
 		r.Get("/rooms/{id}/occupied-slots", bookingHandler.GetOccupiedSlots)
 
