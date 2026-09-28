@@ -234,3 +234,101 @@ func (r *BookingRepository) Delete(ctx context.Context, id string) error {
 	}
 	return nil
 }
+
+func (r *BookingRepository) CheckConflict(
+	ctx context.Context,
+	roomID string,
+	bookingDate string,
+	startTime string,
+	endTime string,
+	excludeBookingID string,
+) (*domain.Booking, error) {
+	db := database.GetDBTX(ctx, r.db)
+	query := `
+		SELECT id, user_id, room_id, room_name, applicant_name, applicant_role,
+		       id_number, prodi, purpose, audience, booking_date, start_time,
+		       end_time, status, admin_notes, created_at, updated_at
+		FROM bookings
+		WHERE room_id = $1
+		  AND booking_date = $2
+		  AND status IN ('approved', 'completed')
+		  AND start_time < $4
+		  AND end_time > $3
+		  AND ($5 = '' OR id != $5)
+		LIMIT 1
+	`
+	var b domain.Booking
+	err := db.QueryRow(ctx, query, roomID, bookingDate, startTime, endTime, excludeBookingID).Scan(
+		&b.ID,
+		&b.UserID,
+		&b.RoomID,
+		&b.RoomName,
+		&b.ApplicantName,
+		&b.ApplicantRole,
+		&b.IDNumber,
+		&b.Prodi,
+		&b.Purpose,
+		&b.Audience,
+		&b.BookingDate,
+		&b.StartTime,
+		&b.EndTime,
+		&b.Status,
+		&b.AdminNotes,
+		&b.CreatedAt,
+		&b.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil // No conflict
+		}
+		return nil, fmt.Errorf("failed to check booking conflict: %w", err)
+	}
+	return &b, nil
+}
+
+func (r *BookingRepository) GetOccupiedSlots(ctx context.Context, roomID string, date string) ([]domain.Booking, error) {
+	db := database.GetDBTX(ctx, r.db)
+	query := `
+		SELECT id, user_id, room_id, room_name, applicant_name, applicant_role,
+		       id_number, prodi, purpose, audience, booking_date, start_time,
+		       end_time, status, admin_notes, created_at, updated_at
+		FROM bookings
+		WHERE room_id = $1
+		  AND booking_date = $2
+		  AND status IN ('approved', 'completed')
+		ORDER BY start_time ASC
+	`
+	rows, err := db.Query(ctx, query, roomID, date)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get occupied slots: %w", err)
+	}
+	defer rows.Close()
+
+	var bookings []domain.Booking
+	for rows.Next() {
+		var b domain.Booking
+		if err := rows.Scan(
+			&b.ID,
+			&b.UserID,
+			&b.RoomID,
+			&b.RoomName,
+			&b.ApplicantName,
+			&b.ApplicantRole,
+			&b.IDNumber,
+			&b.Prodi,
+			&b.Purpose,
+			&b.Audience,
+			&b.BookingDate,
+			&b.StartTime,
+			&b.EndTime,
+			&b.Status,
+			&b.AdminNotes,
+			&b.CreatedAt,
+			&b.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan occupied slot: %w", err)
+		}
+		bookings = append(bookings, b)
+	}
+	return bookings, rows.Err()
+}

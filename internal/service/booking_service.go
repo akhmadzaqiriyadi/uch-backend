@@ -66,7 +66,17 @@ func (s *BookingService) CreateBooking(ctx context.Context, userID uuid.UUID, re
 		roomName = room.Name
 	}
 
-	// 2. Build booking model
+	// 2. Check for slot conflict with existing approved/active bookings
+	conflict, err := s.bookingRepo.CheckConflict(ctx, room.ID, req.BookingDate, req.StartTime, req.EndTime, "")
+	if err != nil {
+		return nil, fmt.Errorf("gagal memeriksa ketersediaan jadwal ruangan: %w", err)
+	}
+	if conflict != nil {
+		return nil, fmt.Errorf("%w: jadwal ruangan %s pada tanggal %s pukul %s - %s telah terisi/disetujui untuk kegiatan '%s' (Kode: %s)",
+			domain.ErrConflict, roomName, req.BookingDate, conflict.StartTime, conflict.EndTime, conflict.Purpose, conflict.ID)
+	}
+
+	// 3. Build booking model
 	bookingID := s.generateBookingCode()
 	now := time.Now().UTC()
 
@@ -171,6 +181,17 @@ func (s *BookingService) UpdateBookingStatus(ctx context.Context, adminID uuid.U
 	booking, err := s.bookingRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+
+	if req.Status == "approved" {
+		conflict, err := s.bookingRepo.CheckConflict(ctx, booking.RoomID, booking.BookingDate, booking.StartTime, booking.EndTime, booking.ID)
+		if err != nil {
+			return nil, fmt.Errorf("gagal memeriksa bentrok jadwal ruangan: %w", err)
+		}
+		if conflict != nil {
+			return nil, fmt.Errorf("%w: tidak dapat menyetujui, ruangan %s pada tanggal %s jam %s - %s sudah disetujui untuk reservasi %s (%s)",
+				domain.ErrConflict, booking.RoomName, booking.BookingDate, conflict.StartTime, conflict.EndTime, conflict.ID, conflict.ApplicantName)
+		}
 	}
 
 	if err := s.bookingRepo.UpdateStatus(ctx, id, req.Status, req.Notes); err != nil {
@@ -473,4 +494,8 @@ func (s *BookingService) SelfCheckIn(ctx context.Context, userID uuid.UUID, req 
 	}
 
 	return &target, nil
+}
+
+func (s *BookingService) GetOccupiedSlots(ctx context.Context, roomID string, date string) ([]domain.Booking, error) {
+	return s.bookingRepo.GetOccupiedSlots(ctx, roomID, date)
 }

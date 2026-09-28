@@ -82,5 +82,7 @@ type BookingRepository interface {
 	List(ctx context.Context, filter BookingFilter) ([]Booking, int, error)
 	UpdateStatus(ctx context.Context, id string, status string, notes *string) error
 	Delete(ctx context.Context, id string) error
+	CheckConflict(ctx context.Context, roomID string, bookingDate string, startTime string, endTime string, excludeBookingID string) (*Booking, error)
+	GetOccupiedSlots(ctx context.Context, roomID string, date string) ([]Booking, error)
 }
 

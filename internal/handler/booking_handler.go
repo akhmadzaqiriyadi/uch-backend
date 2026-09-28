@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -43,6 +44,10 @@ func (h *BookingHandler) CreateBooking(w http.ResponseWriter, r *http.Request) {
 
 	booking, err := h.bookingService.CreateBooking(r.Context(), userID, &req)
 	if err != nil {
+		if errors.Is(err, domain.ErrConflict) {
+			response.Error(w, http.StatusConflict, "SCHEDULE_CONFLICT", err.Error(), nil)
+			return
+		}
 		response.InternalServerError(w, "Gagal membuat permohonan reservasi", err.Error())
 		return
 	}
@@ -153,6 +158,10 @@ func (h *BookingHandler) UpdateBookingStatus(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			response.NotFound(w, "Data reservasi tidak ditemukan")
+			return
+		}
+		if errors.Is(err, domain.ErrConflict) {
+			response.Error(w, http.StatusConflict, "SCHEDULE_CONFLICT", err.Error(), nil)
 			return
 		}
 		response.InternalServerError(w, "Gagal memperbarui status reservasi", err.Error())
@@ -267,4 +276,20 @@ func (h *BookingHandler) SelfCheckIn(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.OK(w, "Check-in mandiri berhasil! Selamat beraktivitas di UTY Creative Hub", booking)
+}
+
+func (h *BookingHandler) GetOccupiedSlots(w http.ResponseWriter, r *http.Request) {
+	roomID := chi.URLParam(r, "id")
+	date := r.URL.Query().Get("date")
+	if date == "" {
+		date = time.Now().Format("2006-01-02")
+	}
+
+	slots, err := h.bookingService.GetOccupiedSlots(r.Context(), roomID, date)
+	if err != nil {
+		response.InternalServerError(w, "Gagal mengambil data jadwal terisi", err.Error())
+		return
+	}
+
+	response.OK(w, "Jadwal terisi berhasil dimuat", slots)
 }

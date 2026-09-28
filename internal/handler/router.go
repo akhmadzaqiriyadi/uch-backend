@@ -108,6 +108,7 @@ func NewRouter(
 		// Public Rooms catalog
 		r.Get("/rooms", roomHandler.ListRooms)
 		r.Get("/rooms/{id}", roomHandler.GetRoom)
+		r.Get("/rooms/{id}/occupied-slots", bookingHandler.GetOccupiedSlots)
 
 		// Protected Routes (Requires valid JWT Access Token)
 		r.Group(func(r chi.Router) {
