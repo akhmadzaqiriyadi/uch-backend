@@ -57,7 +57,7 @@ func (m *mockStorage) GetFile(ctx context.Context, key string) (io.ReadCloser, s
 func TestUploadHandler_UploadFile(t *testing.T) {
 	t.Run("Success", func(t *testing.T) {
 		mockStore := &mockStorage{}
-		h := NewUploadHandler(mockStore)
+		h := NewUploadHandler(mockStore, nil)
 
 		body := &bytes.Buffer{}
 		writer := multipart.NewWriter(body)
@@ -76,7 +76,7 @@ func TestUploadHandler_UploadFile(t *testing.T) {
 
 	t.Run("Missing File Field", func(t *testing.T) {
 		mockStore := &mockStorage{}
-		h := NewUploadHandler(mockStore)
+		h := NewUploadHandler(mockStore, nil)
 
 		body := &bytes.Buffer{}
 		writer := multipart.NewWriter(body)
@@ -96,7 +96,7 @@ func TestUploadHandler_UploadFile(t *testing.T) {
 				return nil, storage.ErrFileTooLarge
 			},
 		}
-		h := NewUploadHandler(mockStore)
+		h := NewUploadHandler(mockStore, nil)
 
 		body := &bytes.Buffer{}
 		writer := multipart.NewWriter(body)
@@ -119,7 +119,7 @@ func TestUploadHandler_UploadFile(t *testing.T) {
 				return nil, storage.ErrInvalidFileType
 			},
 		}
-		h := NewUploadHandler(mockStore)
+		h := NewUploadHandler(mockStore, nil)
 
 		body := &bytes.Buffer{}
 		writer := multipart.NewWriter(body)

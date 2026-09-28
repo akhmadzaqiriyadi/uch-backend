@@ -81,7 +81,7 @@ func (m *mockRBACRepo) DeleteRole(ctx context.Context, id string) error {
 func TestRBACHandler(t *testing.T) {
 	t.Run("ListRoles_Success", func(t *testing.T) {
 		repo := &mockRBACRepo{}
-		h := NewRBACHandler(repo)
+		h := NewRBACHandler(repo, nil)
 
 		req := httptest.NewRequest("GET", "/roles", nil)
 		w := httptest.NewRecorder()
@@ -97,7 +97,7 @@ func TestRBACHandler(t *testing.T) {
 				return nil, errors.New("db error")
 			},
 		}
-		h := NewRBACHandler(repo)
+		h := NewRBACHandler(repo, nil)
 
 		req := httptest.NewRequest("GET", "/roles", nil)
 		w := httptest.NewRecorder()
@@ -108,7 +108,7 @@ func TestRBACHandler(t *testing.T) {
 
 	t.Run("ListPermissions_Success", func(t *testing.T) {
 		repo := &mockRBACRepo{}
-		h := NewRBACHandler(repo)
+		h := NewRBACHandler(repo, nil)
 
 		req := httptest.NewRequest("GET", "/permissions", nil)
 		w := httptest.NewRecorder()
@@ -120,7 +120,7 @@ func TestRBACHandler(t *testing.T) {
 
 	t.Run("AssignPermission_Success", func(t *testing.T) {
 		repo := &mockRBACRepo{}
-		h := NewRBACHandler(repo)
+		h := NewRBACHandler(repo, nil)
 
 		r := chi.NewRouter()
 		r.Post("/roles/{role_id}/permissions/{permission_id}", h.AssignPermission)
@@ -134,7 +134,7 @@ func TestRBACHandler(t *testing.T) {
 
 	t.Run("RevokePermission_Success", func(t *testing.T) {
 		repo := &mockRBACRepo{}
-		h := NewRBACHandler(repo)
+		h := NewRBACHandler(repo, nil)
 
 		r := chi.NewRouter()
 		r.Delete("/roles/{role_id}/permissions/{permission_id}", h.RevokePermission)

@@ -26,10 +26,17 @@ func (r *AuditRepository) Create(ctx context.Context, log *domain.AuditLog) erro
 	`
 	var detailsJSON []byte
 	if log.Details != nil {
-		var err error
-		detailsJSON, err = json.Marshal(log.Details)
-		if err != nil {
-			detailsJSON = nil
+		switch d := log.Details.(type) {
+		case []byte:
+			detailsJSON = d
+		case string:
+			detailsJSON = []byte(d)
+		default:
+			var err error
+			detailsJSON, err = json.Marshal(d)
+			if err != nil {
+				detailsJSON = nil
+			}
 		}
 	}
 
@@ -52,7 +59,7 @@ func (r *AuditRepository) Create(ctx context.Context, log *domain.AuditLog) erro
 }
 
 func (r *AuditRepository) List(ctx context.Context, p pagination.Params, action string) ([]domain.AuditLog, int, error) {
-	countQuery := `SELECT COUNT(*) FROM audit_logs WHERE ($1 = '' OR action = $1)`
+	countQuery := `SELECT COUNT(*) FROM audit_logs WHERE ($1 = '' OR action = $1 OR action LIKE $1 || '.%' OR action LIKE $1 || ':%')`
 	var totalItems int
 	if err := r.db.QueryRow(ctx, countQuery, action).Scan(&totalItems); err != nil {
 		return nil, 0, fmt.Errorf("failed to count audit logs: %w", err)
@@ -66,7 +73,7 @@ func (r *AuditRepository) List(ctx context.Context, p pagination.Params, action 
 	query := fmt.Sprintf(`
 		SELECT id, user_id, action, entity, entity_id, ip_address, user_agent, details, created_at
 		FROM audit_logs
-		WHERE ($1 = '' OR action = $1)
+		WHERE ($1 = '' OR action = $1 OR action LIKE $1 || '.%%' OR action LIKE $1 || ':%%')
 		ORDER BY created_at %s
 		LIMIT $2 OFFSET $3
 	`, orderDir)

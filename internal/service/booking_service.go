@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"crypto/rand"
-	"encoding/json"
 	"fmt"
 	"math"
 	"math/big"
@@ -45,6 +44,21 @@ func NewBookingService(
 
 func (s *BookingService) SetNotifier(notifier RealtimeNotifier) {
 	s.notifier = notifier
+}
+
+func (s *BookingService) logAudit(ctx context.Context, userID *uuid.UUID, action, entityID string, details any) {
+	if s.auditRepo == nil {
+		return
+	}
+	_ = s.auditRepo.Create(ctx, &domain.AuditLog{
+		ID:        uuid.New(),
+		UserID:    userID,
+		Action:    action,
+		Entity:    "bookings",
+		EntityID:  entityID,
+		Details:   details,
+		CreatedAt: time.Now().UTC(),
+	})
 }
 
 func (s *BookingService) generateBookingCode() string {
@@ -105,25 +119,15 @@ func (s *BookingService) CreateBooking(ctx context.Context, userID uuid.UUID, re
 	}
 
 	// 3. Record Audit Log
-	if s.auditRepo != nil {
-		auditDetails, _ := json.Marshal(map[string]interface{}{
-			"booking_id":     bookingID,
-			"room_id":        room.ID,
-			"room_name":      roomName,
-			"applicant_name": req.ApplicantName,
-			"booking_date":   req.BookingDate,
-			"time_slot":      fmt.Sprintf("%s - %s", req.StartTime, req.EndTime),
-		})
-		_ = s.auditRepo.Create(ctx, &domain.AuditLog{
-			ID:        uuid.New(),
-			UserID:    &userID,
-			Action:    "booking:create",
-			Entity:    "bookings",
-			EntityID:  bookingID,
-			Details:   auditDetails,
-			CreatedAt: now,
-		})
-	}
+	s.logAudit(ctx, &userID, "booking.created", bookingID, map[string]any{
+		"booking_id":     bookingID,
+		"room_id":        room.ID,
+		"room_name":      roomName,
+		"applicant_name": req.ApplicantName,
+		"booking_date":   req.BookingDate,
+		"time_slot":      fmt.Sprintf("%s - %s", req.StartTime, req.EndTime),
+		"purpose":        req.Purpose,
+	})
 
 	if s.notifier != nil {
 		s.notifier.SendToRole("admin", "booking:created", map[string]any{
@@ -203,23 +207,12 @@ func (s *BookingService) UpdateBookingStatus(ctx context.Context, adminID uuid.U
 	booking.UpdatedAt = time.Now().UTC()
 
 	// Record Audit Log
-	if s.auditRepo != nil {
-		auditDetails, _ := json.Marshal(map[string]interface{}{
-			"booking_id": id,
-			"old_status": booking.Status,
-			"new_status": req.Status,
-			"notes":      req.Notes,
-		})
-		_ = s.auditRepo.Create(ctx, &domain.AuditLog{
-			ID:        uuid.New(),
-			UserID:    &adminID,
-			Action:    "booking:update_status",
-			Entity:    "bookings",
-			EntityID:  id,
-			Details:   auditDetails,
-			CreatedAt: time.Now().UTC(),
-		})
-	}
+	s.logAudit(ctx, &adminID, "booking.status_updated", id, map[string]any{
+		"booking_id": id,
+		"old_status": booking.Status,
+		"new_status": req.Status,
+		"notes":      req.Notes,
+	})
 
 	if s.notifier != nil {
 		notesStr := ""
@@ -279,27 +272,21 @@ func (s *BookingService) CancelBooking(ctx context.Context, userID uuid.UUID, id
 		return err
 	}
 
-	if s.auditRepo != nil {
-		auditDetails, _ := json.Marshal(map[string]interface{}{
-			"booking_id": id,
-			"cancelled_by": userID.String(),
-		})
-		_ = s.auditRepo.Create(ctx, &domain.AuditLog{
-			ID:        uuid.New(),
-			UserID:    &userID,
-			Action:    "booking:cancel",
-			Entity:    "bookings",
-			EntityID:  id,
-			Details:   auditDetails,
-			CreatedAt: time.Now().UTC(),
-		})
-	}
+	s.logAudit(ctx, &userID, "booking.cancelled", id, map[string]any{
+		"booking_id":   id,
+		"cancelled_by": userID.String(),
+		"notes":        cancelNotes,
+	})
 
 	return nil
 }
 
 func (s *BookingService) DeleteBooking(ctx context.Context, id string) error {
-	return s.bookingRepo.Delete(ctx, id)
+	if err := s.bookingRepo.Delete(ctx, id); err != nil {
+		return err
+	}
+	s.logAudit(ctx, nil, "booking.deleted", id, map[string]string{"id": id})
+	return nil
 }
 
 func (s *BookingService) AdminCheckIn(ctx context.Context, adminID uuid.UUID, bookingCode string) (*domain.Booking, error) {
@@ -326,24 +313,13 @@ func (s *BookingService) AdminCheckIn(ctx context.Context, adminID uuid.UUID, bo
 	booking.AdminNotes = &notes
 	booking.UpdatedAt = time.Now().UTC()
 
-	if s.auditRepo != nil {
-		auditDetails, _ := json.Marshal(map[string]interface{}{
-			"booking_id":     booking.ID,
-			"room_name":      booking.RoomName,
-			"applicant_name": booking.ApplicantName,
-			"checkin_type":   "admin_scan",
-			"verified_by":    adminID.String(),
-		})
-		_ = s.auditRepo.Create(ctx, &domain.AuditLog{
-			ID:        uuid.New(),
-			UserID:    &adminID,
-			Action:    "booking:checkin",
-			Entity:    "bookings",
-			EntityID:  booking.ID,
-			Details:   auditDetails,
-			CreatedAt: time.Now().UTC(),
-		})
-	}
+	s.logAudit(ctx, &adminID, "booking.checked_in", booking.ID, map[string]any{
+		"booking_id":     booking.ID,
+		"room_name":      booking.RoomName,
+		"applicant_name": booking.ApplicantName,
+		"checkin_type":   "admin_scan",
+		"verified_by":    adminID.String(),
+	})
 
 	if s.notifier != nil {
 		s.notifier.SendToUser(booking.UserID, "booking:checked_in", map[string]any{
@@ -388,22 +364,11 @@ func (s *BookingService) SelfCheckIn(ctx context.Context, userID uuid.UUID, req 
 		booking.AdminNotes = &notes
 		booking.UpdatedAt = time.Now().UTC()
 
-		if s.auditRepo != nil {
-			auditDetails, _ := json.Marshal(map[string]interface{}{
-				"booking_id":   booking.ID,
-				"room_name":    booking.RoomName,
-				"checkin_type": "user_self_scan",
-			})
-			_ = s.auditRepo.Create(ctx, &domain.AuditLog{
-				ID:        uuid.New(),
-				UserID:    &userID,
-				Action:    "booking:self_checkin",
-				Entity:    "bookings",
-				EntityID:  booking.ID,
-				Details:   auditDetails,
-				CreatedAt: time.Now().UTC(),
-			})
-		}
+		s.logAudit(ctx, &userID, "booking.checked_in", booking.ID, map[string]any{
+			"booking_id":   booking.ID,
+			"room_name":    booking.RoomName,
+			"checkin_type": "user_self_scan",
+		})
 
 		if s.notifier != nil {
 			s.notifier.SendToUser(booking.UserID, "booking:checked_in", map[string]any{
@@ -459,23 +424,12 @@ func (s *BookingService) SelfCheckIn(ctx context.Context, userID uuid.UUID, req 
 	target.AdminNotes = &notes
 	target.UpdatedAt = time.Now().UTC()
 
-	if s.auditRepo != nil {
-		auditDetails, _ := json.Marshal(map[string]interface{}{
-			"booking_id":   target.ID,
-			"room_id":      roomID,
-			"room_name":    target.RoomName,
-			"checkin_type": "user_room_qr_scan",
-		})
-		_ = s.auditRepo.Create(ctx, &domain.AuditLog{
-			ID:        uuid.New(),
-			UserID:    &userID,
-			Action:    "booking:self_checkin",
-			Entity:    "bookings",
-			EntityID:  target.ID,
-			Details:   auditDetails,
-			CreatedAt: time.Now().UTC(),
-		})
-	}
+	s.logAudit(ctx, &userID, "booking.checked_in", target.ID, map[string]any{
+		"booking_id":   target.ID,
+		"room_id":      roomID,
+		"room_name":    target.RoomName,
+		"checkin_type": "user_room_qr_scan",
+	})
 
 	if s.notifier != nil {
 		s.notifier.SendToUser(target.UserID, "booking:checked_in", map[string]any{

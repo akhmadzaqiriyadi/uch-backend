@@ -1,21 +1,48 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
 	"gozaq/internal/domain"
+	"gozaq/internal/handler/middleware"
 	"gozaq/pkg/response"
 )
 
 type RBACHandler struct {
-	repo domain.RBACRepository
+	repo      domain.RBACRepository
+	auditRepo domain.AuditRepository
 }
 
-func NewRBACHandler(repo domain.RBACRepository) *RBACHandler {
-	return &RBACHandler{repo: repo}
+func NewRBACHandler(repo domain.RBACRepository, auditRepo domain.AuditRepository) *RBACHandler {
+	return &RBACHandler{
+		repo:      repo,
+		auditRepo: auditRepo,
+	}
+}
+
+func (h *RBACHandler) logAudit(ctx context.Context, action, entityID string, details any) {
+	if h.auditRepo == nil {
+		return
+	}
+	var uid *uuid.UUID
+	if id, err := middleware.GetUserID(ctx); err == nil {
+		uid = &id
+	}
+	_ = h.auditRepo.Create(ctx, &domain.AuditLog{
+		ID:        uuid.New(),
+		UserID:    uid,
+		Action:    action,
+		Entity:    "roles",
+		EntityID:  entityID,
+		Details:   details,
+		CreatedAt: time.Now().UTC(),
+	})
 }
 
 func (h *RBACHandler) ListRoles(w http.ResponseWriter, r *http.Request) {
@@ -50,6 +77,11 @@ func (h *RBACHandler) AssignPermission(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.logAudit(r.Context(), "permission.assigned", roleID, map[string]string{
+		"role_id":       roleID,
+		"permission_id": permID,
+	})
+
 	response.OK(w, "Permission assigned to role successfully", nil)
 }
 
@@ -66,6 +98,11 @@ func (h *RBACHandler) RevokePermission(w http.ResponseWriter, r *http.Request) {
 		response.InternalServerError(w, "Failed to revoke permission", err.Error())
 		return
 	}
+
+	h.logAudit(r.Context(), "permission.revoked", roleID, map[string]string{
+		"role_id":       roleID,
+		"permission_id": permID,
+	})
 
 	response.OK(w, "Permission revoked from role successfully", nil)
 }
@@ -91,6 +128,8 @@ func (h *RBACHandler) CreateRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.logAudit(r.Context(), "role.created", req.ID, req)
+
 	response.Created(w, "Role created successfully", req)
 }
 
@@ -110,6 +149,8 @@ func (h *RBACHandler) DeleteRole(w http.ResponseWriter, r *http.Request) {
 		response.InternalServerError(w, "Failed to delete role", err.Error())
 		return
 	}
+
+	h.logAudit(r.Context(), "role.deleted", roleID, map[string]string{"role_id": roleID})
 
 	response.OK(w, "Role deleted successfully", nil)
 }

@@ -5,20 +5,26 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
+	"gozaq/internal/domain"
+	"gozaq/internal/handler/middleware"
 	"gozaq/pkg/response"
 	"gozaq/pkg/storage"
 )
 
 type UploadHandler struct {
-	storage storage.Storage
+	storage   storage.Storage
+	auditRepo domain.AuditRepository
 }
 
-func NewUploadHandler(storage storage.Storage) *UploadHandler {
+func NewUploadHandler(storage storage.Storage, auditRepo domain.AuditRepository) *UploadHandler {
 	return &UploadHandler{
-		storage: storage,
+		storage:   storage,
+		auditRepo: auditRepo,
 	}
 }
 
@@ -55,6 +61,27 @@ func (h *UploadHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		}
 		response.InternalServerError(w, "Failed to store uploaded file", err.Error())
 		return
+	}
+
+	if h.auditRepo != nil {
+		var uid *uuid.UUID
+		if id, err := middleware.GetUserID(r.Context()); err == nil {
+			uid = &id
+		}
+		_ = h.auditRepo.Create(r.Context(), &domain.AuditLog{
+			ID:        uuid.New(),
+			UserID:    uid,
+			Action:    "file.uploaded",
+			Entity:    "uploads",
+			EntityID:  fileInfo.FileName,
+			Details: map[string]any{
+				"filename": fileInfo.FileName,
+				"folder":   folder,
+				"size":     fileInfo.Size,
+				"url":      fileInfo.URL,
+			},
+			CreatedAt: time.Now().UTC(),
+		})
 	}
 
 	response.Created(w, "File uploaded successfully", fileInfo)

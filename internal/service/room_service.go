@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"gozaq/internal/domain"
 )
 
@@ -20,6 +22,20 @@ func NewRoomService(roomRepo domain.RoomRepository, auditRepo domain.AuditReposi
 		roomRepo:  roomRepo,
 		auditRepo: auditRepo,
 	}
+}
+
+func (s *RoomService) logAudit(ctx context.Context, action, entityID string, details any) {
+	if s.auditRepo == nil {
+		return
+	}
+	_ = s.auditRepo.Create(ctx, &domain.AuditLog{
+		ID:        uuid.New(),
+		Action:    action,
+		Entity:    "rooms",
+		EntityID:  entityID,
+		Details:   details,
+		CreatedAt: time.Now().UTC(),
+	})
 }
 
 func (s *RoomService) ListRooms(ctx context.Context) ([]domain.Room, error) {
@@ -75,13 +91,30 @@ func (s *RoomService) CreateRoom(ctx context.Context, req *domain.CreateRoomRequ
 		return nil, fmt.Errorf("failed to create room: %w", err)
 	}
 
+	s.logAudit(ctx, "room.created", room.ID, map[string]any{
+		"name":        room.Name,
+		"capacity":    room.Capacity,
+		"category":    room.Category,
+		"location":    room.Location,
+		"status":      room.Status,
+		"created_at":  room.CreatedAt,
+	})
+
 	return room, nil
 }
 
 func (s *RoomService) UpdateRoom(ctx context.Context, id string, req *domain.UpdateRoomRequest) (*domain.Room, error) {
-	return s.roomRepo.Update(ctx, id, req)
+	updated, err := s.roomRepo.Update(ctx, id, req)
+	if err == nil && updated != nil {
+		s.logAudit(ctx, "room.updated", id, req)
+	}
+	return updated, err
 }
 
 func (s *RoomService) DeleteRoom(ctx context.Context, id string) error {
-	return s.roomRepo.Delete(ctx, id)
+	if err := s.roomRepo.Delete(ctx, id); err != nil {
+		return err
+	}
+	s.logAudit(ctx, "room.deleted", id, map[string]string{"id": id})
+	return nil
 }
