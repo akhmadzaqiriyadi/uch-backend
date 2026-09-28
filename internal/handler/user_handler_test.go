@@ -68,8 +68,21 @@ func (m *MockUserService) UpdateProfile(ctx context.Context, userID uuid.UUID, r
 	return args.Get(0).(*domain.UserResponse), args.Error(1)
 }
 
+func (m *MockUserService) ChangePassword(ctx context.Context, userID uuid.UUID, req domain.ChangePasswordRequest) error {
+	args := m.Called(ctx, userID, req)
+	return args.Error(0)
+}
+
 func (m *MockUserService) UpdateUserRole(ctx context.Context, userID uuid.UUID, role string) (*domain.UserResponse, error) {
 	args := m.Called(ctx, userID, role)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*domain.UserResponse), args.Error(1)
+}
+
+func (m *MockUserService) UpdateUser(ctx context.Context, userID uuid.UUID, req domain.AdminUpdateUserRequest) (*domain.UserResponse, error) {
+	args := m.Called(ctx, userID, req)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}

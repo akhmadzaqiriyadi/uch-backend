@@ -24,6 +24,9 @@ func NewRouter(
 	uploadHandler *UploadHandler,
 	rbacHandler *RBACHandler,
 	auditHandler *AuditHandler,
+	roomHandler *RoomHandler,
+	bookingHandler *BookingHandler,
+	wsHandler *WebSocketHandler,
 ) http.Handler {
 	r := chi.NewRouter()
 
@@ -62,8 +65,14 @@ func NewRouter(
 		MaxAge:           300,
 	}))
 
-	// Static File Server for uploaded files
-	r.Handle("/uploads/*", http.StripPrefix("/uploads/", http.FileServer(http.Dir("./uploads"))))
+	// Storage Proxy & Static File Server for uploaded files
+	r.Get("/uploads/*", uploadHandler.ServeFile)
+	r.Head("/uploads/*", uploadHandler.ServeFile)
+	r.Get("/api/v1/upload/file/*", uploadHandler.ServeFile)
+	r.Head("/api/v1/upload/file/*", uploadHandler.ServeFile)
+
+	// Realtime WebSocket endpoint for instant booking notifications
+	r.Get("/ws", wsHandler.HandleWS)
 
 	// Go Runtime Profiler (/debug/pprof/* for CPU, heap, goroutine analysis)
 	r.Mount("/debug", chiMiddleware.Profiler())
@@ -81,6 +90,8 @@ func NewRouter(
 
 	// API v1 Routes
 	r.Route("/api/v1", func(r chi.Router) {
+		r.Get("/ws", wsHandler.HandleWS)
+
 		// Public Auth routes (Anti Brute-Force Rate Limiting)
 		r.Group(func(r chi.Router) {
 			r.Use(authLimiter.Limit())
@@ -94,6 +105,10 @@ func NewRouter(
 			r.Post("/auth/reset-password", userHandler.ResetPassword)
 		})
 
+		// Public Rooms catalog
+		r.Get("/rooms", roomHandler.ListRooms)
+		r.Get("/rooms/{id}", roomHandler.GetRoom)
+
 		// Protected Routes (Requires valid JWT Access Token)
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.Auth(cfg))
@@ -101,14 +116,49 @@ func NewRouter(
 			r.Post("/auth/logout", userHandler.Logout)
 			r.Get("/auth/profile", userHandler.GetProfile)
 			r.Put("/auth/profile", userHandler.UpdateProfile)
+			r.Put("/auth/password", userHandler.ChangePassword)
+
+			// User Booking Flow (Wajib Login & Terproteksi)
+			r.Post("/bookings", bookingHandler.CreateBooking)
+			r.Get("/my-bookings", bookingHandler.ListMyBookings)
+			r.Post("/bookings/{id}/cancel", bookingHandler.CancelBooking)
+			r.Post("/bookings/self-checkin", bookingHandler.SelfCheckIn)
+
+			// Admin & Manager Bookings Management
+			r.With(middleware.RequireAnyPermission("bookings:read", "bookings:manage")).
+				Get("/bookings", bookingHandler.ListAllBookings)
+			r.With(middleware.RequireAnyPermission("bookings:read", "bookings:manage")).
+				Get("/bookings/{id}", bookingHandler.GetBooking)
+			r.With(middleware.RequirePermission("bookings:manage")).
+				Patch("/bookings/{id}/status", bookingHandler.UpdateBookingStatus)
+			r.With(middleware.RequirePermission("bookings:manage")).
+				Post("/bookings/checkin", bookingHandler.AdminCheckIn)
+			r.With(middleware.RequirePermission("bookings:delete")).
+				Delete("/bookings/{id}", bookingHandler.DeleteBooking)
+
+			// Admin Rooms Management (CRUD Ruangan Hub)
+			r.With(middleware.RequirePermission("rooms:create")).
+				Post("/rooms", roomHandler.CreateRoom)
+			r.With(middleware.RequirePermission("rooms:update")).
+				Put("/rooms/{id}", roomHandler.UpdateRoom)
+			r.With(middleware.RequirePermission("rooms:delete")).
+				Delete("/rooms/{id}", roomHandler.DeleteRoom)
 
 			// File Upload Endpoint (Protected by PBAC: uploads:create)
 			r.With(middleware.RequirePermission("uploads:create")).
 				Post("/uploads", uploadHandler.UploadFile)
+			r.With(middleware.RequirePermission("uploads:create")).
+				Post("/upload", uploadHandler.UploadFile)
 
-			// User Management (Protected by Granular Permissions: users:read & users:delete)
+			// User Management (Protected by Granular Permissions: users:read, users:create & users:delete)
 			r.With(middleware.RequirePermission("users:read")).
 				Get("/users", userHandler.ListUsers)
+
+			r.With(middleware.RequireAnyPermission("users:create", "roles:manage")).
+				Post("/users", userHandler.Register)
+
+			r.With(middleware.RequireAnyPermission("users:update", "roles:manage")).
+				Put("/users/{id}", userHandler.UpdateUser)
 
 			r.With(middleware.RequirePermission("users:delete")).
 				Delete("/users/{id}", userHandler.DeleteUser)
@@ -131,6 +181,8 @@ func NewRouter(
 			r.Group(func(r chi.Router) {
 				r.Use(middleware.RequirePermission("roles:manage"))
 
+				r.Post("/roles", rbacHandler.CreateRole)
+				r.Delete("/roles/{id}", rbacHandler.DeleteRole)
 				r.Post("/roles/{role_id}/permissions/{permission_id}", rbacHandler.AssignPermission)
 				r.Delete("/roles/{role_id}/permissions/{permission_id}", rbacHandler.RevokePermission)
 			})

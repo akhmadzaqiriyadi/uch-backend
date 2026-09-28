@@ -27,8 +27,8 @@ func NewUserRepository(db *pgxpool.Pool) *UserRepository {
 func (r *UserRepository) Create(ctx context.Context, user *domain.User) error {
 	db := database.GetDBTX(ctx, r.db)
 	query := `
-		INSERT INTO users (id, name, email, password, role, is_verified, verified_at, deleted_at, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		INSERT INTO users (id, name, email, password, role, id_number, affiliation, is_verified, verified_at, deleted_at, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 	`
 	_, err := db.Exec(ctx, query,
 		user.ID,
@@ -36,6 +36,8 @@ func (r *UserRepository) Create(ctx context.Context, user *domain.User) error {
 		user.Email,
 		user.Password,
 		user.Role,
+		user.IDNumber,
+		user.Affiliation,
 		user.IsVerified,
 		user.VerifiedAt,
 		user.DeletedAt,
@@ -55,7 +57,7 @@ func (r *UserRepository) Create(ctx context.Context, user *domain.User) error {
 
 func (r *UserRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error) {
 	query := `
-		SELECT id, name, email, password, role, is_verified, verified_at, deleted_at, created_at, updated_at
+		SELECT id, name, email, password, role, COALESCE(id_number, ''), COALESCE(affiliation, ''), is_verified, verified_at, deleted_at, created_at, updated_at
 		FROM users
 		WHERE id = $1 AND deleted_at IS NULL
 	`
@@ -66,6 +68,8 @@ func (r *UserRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Use
 		&user.Email,
 		&user.Password,
 		&user.Role,
+		&user.IDNumber,
+		&user.Affiliation,
 		&user.IsVerified,
 		&user.VerifiedAt,
 		&user.DeletedAt,
@@ -84,7 +88,7 @@ func (r *UserRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Use
 
 func (r *UserRepository) GetByEmail(ctx context.Context, email string) (*domain.User, error) {
 	query := `
-		SELECT id, name, email, password, role, is_verified, verified_at, deleted_at, created_at, updated_at
+		SELECT id, name, email, password, role, COALESCE(id_number, ''), COALESCE(affiliation, ''), is_verified, verified_at, deleted_at, created_at, updated_at
 		FROM users
 		WHERE email = $1 AND deleted_at IS NULL
 	`
@@ -95,6 +99,8 @@ func (r *UserRepository) GetByEmail(ctx context.Context, email string) (*domain.
 		&user.Email,
 		&user.Password,
 		&user.Role,
+		&user.IDNumber,
+		&user.Affiliation,
 		&user.IsVerified,
 		&user.VerifiedAt,
 		&user.DeletedAt,
@@ -115,13 +121,18 @@ func (r *UserRepository) Update(ctx context.Context, user *domain.User) error {
 	db := database.GetDBTX(ctx, r.db)
 	query := `
 		UPDATE users
-		SET name = $2, role = $3, updated_at = $4
+		SET name = $2, email = $3, role = $4, id_number = $5, affiliation = $6, is_verified = $7, verified_at = $8, updated_at = $9
 		WHERE id = $1 AND deleted_at IS NULL
 	`
 	_, err := db.Exec(ctx, query,
 		user.ID,
 		user.Name,
+		user.Email,
 		user.Role,
+		user.IDNumber,
+		user.Affiliation,
+		user.IsVerified,
+		user.VerifiedAt,
 		user.UpdatedAt,
 	)
 	return err
@@ -190,7 +201,7 @@ func (r *UserRepository) List(ctx context.Context, p pagination.Params, search s
 	}
 
 	query := fmt.Sprintf(`
-		SELECT id, name, email, password, role, is_verified, verified_at, deleted_at, created_at, updated_at
+		SELECT id, name, email, password, role, COALESCE(id_number, ''), COALESCE(affiliation, ''), is_verified, verified_at, deleted_at, created_at, updated_at
 		FROM users
 		WHERE deleted_at IS NULL AND (name ILIKE $1 OR email ILIKE $1)
 		ORDER BY %s %s
@@ -212,6 +223,8 @@ func (r *UserRepository) List(ctx context.Context, p pagination.Params, search s
 			&u.Email,
 			&u.Password,
 			&u.Role,
+			&u.IDNumber,
+			&u.Affiliation,
 			&u.IsVerified,
 			&u.VerifiedAt,
 			&u.DeletedAt,

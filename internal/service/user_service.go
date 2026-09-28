@@ -80,14 +80,16 @@ func (s *UserService) Register(ctx context.Context, req domain.RegisterRequest) 
 
 	now := time.Now().UTC()
 	user := &domain.User{
-		ID:         uuid.New(),
-		Name:       req.Name,
-		Email:      req.Email,
-		Password:   string(hashedPassword),
-		Role:       role,
-		IsVerified: false,
-		CreatedAt:  now,
-		UpdatedAt:  now,
+		ID:          uuid.New(),
+		Name:        req.Name,
+		Email:       req.Email,
+		Password:    string(hashedPassword),
+		Role:        role,
+		IDNumber:    req.IDNumber,
+		Affiliation: req.Affiliation,
+		IsVerified:  false,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
 
 	if err := s.repo.Create(ctx, user); err != nil {
@@ -353,6 +355,9 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID uuid.UUID, req d
 	}
 
 	user.Name = req.Name
+	if req.Affiliation != "" {
+		user.Affiliation = req.Affiliation
+	}
 	user.UpdatedAt = time.Now().UTC()
 
 	if err := s.repo.Update(ctx, user); err != nil {
@@ -364,6 +369,34 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID uuid.UUID, req d
 	permissions := s.getRolePermissions(ctx, user.Role)
 	resp := user.ToResponse(permissions...)
 	return &resp, nil
+}
+
+func (s *UserService) ChangePassword(ctx context.Context, userID uuid.UUID, req domain.ChangePasswordRequest) error {
+	user, err := s.repo.GetByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.OldPassword)); err != nil {
+		return domain.ErrWrongPassword
+	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+
+	if err := s.repo.UpdatePassword(ctx, userID, string(hashedPassword)); err != nil {
+		return err
+	}
+
+	_ = s.cache.Delete(ctx, fmt.Sprintf("user:profile:%s", userID.String()))
+
+	s.logAudit(&user.ID, "user.change_password", "users", user.ID.String(), map[string]string{
+		"email": user.Email,
+	})
+
+	return nil
 }
 
 func (s *UserService) UpdateUserRole(ctx context.Context, userID uuid.UUID, role string) (*domain.UserResponse, error) {
@@ -386,6 +419,45 @@ func (s *UserService) UpdateUserRole(ctx context.Context, userID uuid.UUID, role
 	})
 
 	permissions := s.getRolePermissions(ctx, role)
+	resp := user.ToResponse(permissions...)
+	return &resp, nil
+}
+
+func (s *UserService) UpdateUser(ctx context.Context, userID uuid.UUID, req domain.AdminUpdateUserRequest) (*domain.UserResponse, error) {
+	user, err := s.repo.GetByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	user.Name = req.Name
+	user.Email = req.Email
+	user.Role = req.Role
+	user.IDNumber = req.IDNumber
+	user.Affiliation = req.Affiliation
+	if req.IsVerified != nil {
+		user.IsVerified = *req.IsVerified
+		if user.IsVerified && user.VerifiedAt == nil {
+			now := time.Now().UTC()
+			user.VerifiedAt = &now
+		} else if !user.IsVerified {
+			user.VerifiedAt = nil
+		}
+	}
+	user.UpdatedAt = time.Now().UTC()
+
+	if err := s.repo.Update(ctx, user); err != nil {
+		return nil, err
+	}
+
+	_ = s.cache.Delete(ctx, fmt.Sprintf("user:profile:%s", userID.String()))
+
+	s.logAudit(&userID, "user.updated", "users", userID.String(), map[string]any{
+		"name":  user.Name,
+		"role":  user.Role,
+		"email": user.Email,
+	})
+
+	permissions := s.getRolePermissions(ctx, user.Role)
 	resp := user.ToResponse(permissions...)
 	return &resp, nil
 }

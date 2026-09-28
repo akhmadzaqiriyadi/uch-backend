@@ -11,24 +11,28 @@ import (
 
 // User entity represents user data in core business domain
 type User struct {
-	ID         uuid.UUID  `json:"id"`
-	Name       string     `json:"name"`
-	Email      string     `json:"email"`
-	Password   string     `json:"-"`
-	Role       string     `json:"role"`
-	IsVerified bool       `json:"is_verified"`
-	VerifiedAt *time.Time `json:"verified_at,omitempty"`
-	DeletedAt  *time.Time `json:"deleted_at,omitempty"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
+	ID          uuid.UUID  `json:"id"`
+	Name        string     `json:"name"`
+	Email       string     `json:"email"`
+	Password    string     `json:"-"`
+	Role        string     `json:"role"`
+	IDNumber    string     `json:"id_number,omitempty"`
+	Affiliation string     `json:"affiliation,omitempty"`
+	IsVerified  bool       `json:"is_verified"`
+	VerifiedAt  *time.Time `json:"verified_at,omitempty"`
+	DeletedAt   *time.Time `json:"deleted_at,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
 // Request & Response DTOs
 type RegisterRequest struct {
-	Name     string `json:"name" validate:"required,min=2,max=100"`
-	Email    string `json:"email" validate:"required,email"`
-	Password string `json:"password" validate:"required,min=6,max=50"`
-	Role     string `json:"role,omitempty" validate:"omitempty,oneof=user manager admin"`
+	Name        string `json:"name" validate:"required,min=2,max=100"`
+	Email       string `json:"email" validate:"required,email"`
+	Password    string `json:"password" validate:"required,min=6,max=50"`
+	Role        string `json:"role,omitempty" validate:"omitempty,oneof=user manager admin mahasiswa dosen umum"`
+	IDNumber    string `json:"id_number,omitempty"`
+	Affiliation string `json:"affiliation,omitempty"`
 }
 
 type LoginRequest struct {
@@ -49,11 +53,21 @@ type ResendVerificationRequest struct {
 }
 
 type UpdateProfileRequest struct {
-	Name string `json:"name" validate:"required,min=2,max=100"`
+	Name        string `json:"name" validate:"required,min=2,max=100"`
+	Affiliation string `json:"affiliation,omitempty"`
+}
+
+type AdminUpdateUserRequest struct {
+	Name        string `json:"name" validate:"required,min=2,max=100"`
+	Email       string `json:"email" validate:"required,email"`
+	Role        string `json:"role" validate:"required,oneof=user manager admin mahasiswa dosen umum"`
+	IDNumber    string `json:"id_number,omitempty"`
+	Affiliation string `json:"affiliation,omitempty"`
+	IsVerified  *bool  `json:"is_verified,omitempty"`
 }
 
 type UpdateRoleRequest struct {
-	Role string `json:"role" validate:"required,oneof=user manager admin"`
+	Role string `json:"role" validate:"required,oneof=user manager admin mahasiswa dosen umum"`
 }
 
 type ForgotPasswordRequest struct {
@@ -62,6 +76,11 @@ type ForgotPasswordRequest struct {
 
 type ResetPasswordRequest struct {
 	Token       string `json:"token" validate:"required"`
+	NewPassword string `json:"new_password" validate:"required,min=6,max=50"`
+}
+
+type ChangePasswordRequest struct {
+	OldPassword string `json:"old_password" validate:"required"`
 	NewPassword string `json:"new_password" validate:"required,min=6,max=50"`
 }
 
@@ -76,6 +95,8 @@ type UserResponse struct {
 	Name        string     `json:"name"`
 	Email       string     `json:"email"`
 	Role        string     `json:"role"`
+	IDNumber    string     `json:"id_number,omitempty"`
+	Affiliation string     `json:"affiliation,omitempty"`
 	IsVerified  bool       `json:"is_verified"`
 	VerifiedAt  *time.Time `json:"verified_at,omitempty"`
 	Permissions []string   `json:"permissions"`
@@ -97,6 +118,8 @@ func (u *User) ToResponse(permissions ...string) UserResponse {
 		Name:        u.Name,
 		Email:       u.Email,
 		Role:        u.Role,
+		IDNumber:    u.IDNumber,
+		Affiliation: u.Affiliation,
 		IsVerified:  u.IsVerified,
 		VerifiedAt:  u.VerifiedAt,
 		Permissions: permissions,
@@ -129,7 +152,9 @@ type UserService interface {
 	Logout(ctx context.Context, userID uuid.UUID, refreshToken string) error
 	GetProfile(ctx context.Context, userID uuid.UUID) (*UserResponse, error)
 	UpdateProfile(ctx context.Context, userID uuid.UUID, req UpdateProfileRequest) (*UserResponse, error)
+	ChangePassword(ctx context.Context, userID uuid.UUID, req ChangePasswordRequest) error
 	UpdateUserRole(ctx context.Context, userID uuid.UUID, role string) (*UserResponse, error)
+	UpdateUser(ctx context.Context, userID uuid.UUID, req AdminUpdateUserRequest) (*UserResponse, error)
 	ListUsers(ctx context.Context, p pagination.Params, search string) (*PaginatedUsersResponse, error)
 	DeleteUser(ctx context.Context, userID uuid.UUID) error
 }

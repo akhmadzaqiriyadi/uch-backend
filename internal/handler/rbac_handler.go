@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -67,4 +68,48 @@ func (h *RBACHandler) RevokePermission(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.OK(w, "Permission revoked from role successfully", nil)
+}
+
+func (h *RBACHandler) CreateRole(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID          string `json:"id"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.BadRequest(w, "Invalid JSON payload", err.Error())
+		return
+	}
+
+	if req.ID == "" || req.Name == "" {
+		response.BadRequest(w, "Role ID and Name are required", nil)
+		return
+	}
+
+	if err := h.repo.CreateRole(r.Context(), req.ID, req.Name, req.Description); err != nil {
+		response.InternalServerError(w, "Failed to create role", err.Error())
+		return
+	}
+
+	response.Created(w, "Role created successfully", req)
+}
+
+func (h *RBACHandler) DeleteRole(w http.ResponseWriter, r *http.Request) {
+	roleID := chi.URLParam(r, "id")
+	if roleID == "" {
+		response.BadRequest(w, "Role ID is required", nil)
+		return
+	}
+
+	if roleID == "admin" || roleID == "user" {
+		response.BadRequest(w, "System default roles cannot be deleted", nil)
+		return
+	}
+
+	if err := h.repo.DeleteRole(r.Context(), roleID); err != nil {
+		response.InternalServerError(w, "Failed to delete role", err.Error())
+		return
+	}
+
+	response.OK(w, "Role deleted successfully", nil)
 }

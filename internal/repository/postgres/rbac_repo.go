@@ -124,3 +124,17 @@ func (r *RBACRepository) RevokePermissionFromRole(ctx context.Context, roleID, p
 	_, err := db.Exec(ctx, query, roleID, permissionID)
 	return err
 }
+
+func (r *RBACRepository) CreateRole(ctx context.Context, id, name, description string) error {
+	db := database.GetDBTX(ctx, r.db)
+	query := `INSERT INTO roles (id, name, description, created_at) VALUES ($1, $2, $3, NOW())`
+	_, err := db.Exec(ctx, query, id, name, description)
+	return err
+}
+
+func (r *RBACRepository) DeleteRole(ctx context.Context, id string) error {
+	db := database.GetDBTX(ctx, r.db)
+	_, _ = db.Exec(ctx, `DELETE FROM role_permissions WHERE role_id = $1`, id)
+	_, err := db.Exec(ctx, `DELETE FROM roles WHERE id = $1`, id)
+	return err
+}

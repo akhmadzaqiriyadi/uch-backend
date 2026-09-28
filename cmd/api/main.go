@@ -20,6 +20,7 @@ import (
 	"gozaq/pkg/cache"
 	"gozaq/pkg/database"
 	"gozaq/pkg/mailer"
+	"gozaq/pkg/realtime"
 	"gozaq/pkg/storage"
 	"gozaq/pkg/worker"
 )
@@ -107,16 +108,42 @@ func main() {
 	userRepo := postgres.NewUserRepository(dbPool)
 	rbacRepo := postgres.NewRBACRepository(dbPool)
 	auditRepo := postgres.NewAuditRepository(dbPool)
+	roomRepo := postgres.NewRoomRepository(dbPool)
+	bookingRepo := postgres.NewBookingRepository(dbPool)
+
+	// Realtime Notification WebSocket Hub
+	realtimeHub := realtime.NewHub()
+	go realtimeHub.Run()
+
 	userService := service.NewUserService(userRepo, rbacRepo, auditRepo, cacheClient, workerPool, appMailer, cfg)
+	roomService := service.NewRoomService(roomRepo, auditRepo)
+	bookingService := service.NewBookingService(bookingRepo, roomRepo, userRepo, auditRepo)
+	bookingService.SetNotifier(realtimeHub)
+
 	userHandler := handler.NewUserHandler(userService)
 	docsHandler := handler.NewDocsHandler()
 	healthHandler := handler.NewHealthHandler(cfg, dbPool, cacheClient)
 	uploadHandler := handler.NewUploadHandler(fileStorage)
 	rbacHandler := handler.NewRBACHandler(rbacRepo)
 	auditHandler := handler.NewAuditHandler(auditRepo)
+	roomHandler := handler.NewRoomHandler(roomService)
+	bookingHandler := handler.NewBookingHandler(bookingService)
+	wsHandler := handler.NewWebSocketHandler(realtimeHub, cfg)
 
 	// 6. Router Setup
-	router := handler.NewRouter(cfg, logger, userHandler, docsHandler, healthHandler, uploadHandler, rbacHandler, auditHandler)
+	router := handler.NewRouter(
+		cfg,
+		logger,
+		userHandler,
+		docsHandler,
+		healthHandler,
+		uploadHandler,
+		rbacHandler,
+		auditHandler,
+		roomHandler,
+		bookingHandler,
+		wsHandler,
+	)
 
 	// 7. HTTP Server Configuration
 	srv := &http.Server{

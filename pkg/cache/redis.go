@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -71,26 +72,77 @@ func (r *RedisCache) Close() error {
 	return r.client.Close()
 }
 
-// NoopCache provides a graceful fallback if Redis is disabled or unavailable
-type NoopCache struct{}
-
-func NewNoopCache() *NoopCache {
-	return &NoopCache{}
+type memoryCacheItem struct {
+	data      []byte
+	expiresAt time.Time
 }
 
-func (n *NoopCache) Get(_ context.Context, _ string, _ any) error {
-	return ErrCacheMiss
+// MemoryCache provides in-memory thread-safe caching with TTL support
+type MemoryCache struct {
+	mu    sync.RWMutex
+	items map[string]memoryCacheItem
 }
 
-func (n *NoopCache) Set(_ context.Context, _ string, _ any, _ time.Duration) error {
+func NewMemoryCache() *MemoryCache {
+	return &MemoryCache{
+		items: make(map[string]memoryCacheItem),
+	}
+}
+
+func NewNoopCache() *MemoryCache {
+	return NewMemoryCache()
+}
+
+func (m *MemoryCache) Get(_ context.Context, key string, dest any) error {
+	m.mu.RLock()
+	item, exists := m.items[key]
+	m.mu.RUnlock()
+
+	if !exists {
+		return ErrCacheMiss
+	}
+
+	if !item.expiresAt.IsZero() && time.Now().After(item.expiresAt) {
+		m.mu.Lock()
+		delete(m.items, key)
+		m.mu.Unlock()
+		return ErrCacheMiss
+	}
+
+	return json.Unmarshal(item.data, dest)
+}
+
+func (m *MemoryCache) Set(_ context.Context, key string, value any, ttl time.Duration) error {
+	bytes, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Errorf("failed to marshal cache value: %w", err)
+	}
+
+	var expiresAt time.Time
+	if ttl > 0 {
+		expiresAt = time.Now().Add(ttl)
+	}
+
+	m.mu.Lock()
+	m.items[key] = memoryCacheItem{
+		data:      bytes,
+		expiresAt: expiresAt,
+	}
+	m.mu.Unlock()
 	return nil
 }
 
-func (n *NoopCache) Delete(_ context.Context, _ string) error {
+func (m *MemoryCache) Delete(_ context.Context, key string) error {
+	m.mu.Lock()
+	delete(m.items, key)
+	m.mu.Unlock()
 	return nil
 }
 
-func (n *NoopCache) Close() error {
-	slog.Info("NoopCache closed")
+func (m *MemoryCache) Close() error {
+	slog.Info("MemoryCache closed")
+	m.mu.Lock()
+	m.items = make(map[string]memoryCacheItem)
+	m.mu.Unlock()
 	return nil
 }

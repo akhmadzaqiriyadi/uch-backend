@@ -101,6 +101,14 @@ func (m *MockRBACRepository) RevokePermissionFromRole(ctx context.Context, roleI
 	return nil
 }
 
+func (m *MockRBACRepository) CreateRole(ctx context.Context, id, name, description string) error {
+	return nil
+}
+
+func (m *MockRBACRepository) DeleteRole(ctx context.Context, id string) error {
+	return nil
+}
+
 type MockAuditRepository struct {
 	mock.Mock
 }

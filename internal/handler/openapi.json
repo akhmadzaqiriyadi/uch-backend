@@ -40,7 +40,9 @@
           "name": { "type": "string", "example": "Zaq Doe", "minLength": 2, "maxLength": 100 },
           "email": { "type": "string", "format": "email", "example": "zaq@example.com" },
           "password": { "type": "string", "format": "password", "example": "SecureP@ss123", "minLength": 6 },
-          "role": { "type": "string", "enum": ["user", "admin"], "example": "user" }
+          "role": { "type": "string", "enum": ["user", "manager", "admin", "mahasiswa", "dosen", "umum"], "example": "mahasiswa" },
+          "id_number": { "type": "string", "example": "5210411234", "description": "NPM Mahasiswa, NIDN Dosen, atau NIK KTP Pengguna Umum" },
+          "affiliation": { "type": "string", "example": "Informatika - Fakultas Sains & Teknologi", "description": "Program Studi atau Instansi/Komunitas" }
         },
         "required": ["name", "email", "password"]
       },
@@ -91,7 +93,8 @@
       "UpdateProfileRequest": {
         "type": "object",
         "properties": {
-          "name": { "type": "string", "example": "Zaq Doe Updated", "minLength": 2, "maxLength": 100 }
+          "name": { "type": "string", "example": "Zaq Doe Updated", "minLength": 2, "maxLength": 100 },
+          "affiliation": { "type": "string", "example": "Fakultas Sains & Teknologi" }
         },
         "required": ["name"]
       },
@@ -101,7 +104,9 @@
           "id": { "type": "string", "format": "uuid", "example": "550e8400-e29b-41d4-a716-446655440000" },
           "name": { "type": "string", "example": "Zaq Doe" },
           "email": { "type": "string", "format": "email", "example": "zaq@example.com" },
-          "role": { "type": "string", "example": "user" },
+          "role": { "type": "string", "example": "mahasiswa" },
+          "id_number": { "type": "string", "example": "5210411234" },
+          "affiliation": { "type": "string", "example": "Informatika" },
           "is_verified": { "type": "boolean", "example": true },
           "verified_at": { "type": "string", "format": "date-time", "example": "2026-08-24T10:00:00Z" },
           "permissions": { "type": "array", "items": { "type": "string" }, "example": ["users:read", "uploads:create"] },
@@ -235,10 +240,12 @@
             "application/json": {
               "schema": { "$ref": "#/components/schemas/RegisterRequest" },
               "example": {
-                "name": "Zaq Doe",
-                "email": "zaq@example.com",
+                "name": "Akhmad Zaqi",
+                "email": "zaqi@students.uty.ac.id",
                 "password": "SecurePassword123",
-                "role": "user"
+                "role": "mahasiswa",
+                "id_number": "5210411234",
+                "affiliation": "Informatika"
               }
             }
           }
@@ -259,9 +266,11 @@
                     "refresh_token": "9f82ab7c31d4e08e6f1a9b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e",
                     "user": {
                       "id": "5ee63488-895b-45ab-94f3-afd14c92a551",
-                      "name": "Zaq Doe",
-                      "email": "zaq@example.com",
-                      "role": "user",
+                      "name": "Akhmad Zaqi",
+                      "email": "zaqi@students.uty.ac.id",
+                      "role": "mahasiswa",
+                      "id_number": "5210411234",
+                      "affiliation": "Informatika",
                       "is_verified": false,
                       "permissions": ["uploads:create"],
                       "created_at": "2026-08-24T12:00:00.000Z",
@@ -840,6 +849,44 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/password": {
+      "put": {
+        "tags": ["User Profile"],
+        "summary": "Change Authenticated User Password",
+        "description": "Changes the current user's password. Requires the correct current password.",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["old_password", "new_password"],
+                "properties": {
+                  "old_password": { "type": "string" },
+                  "new_password": { "type": "string", "minLength": 6 }
+                }
+              },
+              "example": {
+                "old_password": "Password123!",
+                "new_password": "NewPassword123!"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Password changed successfully"
+          },
+          "400": {
+            "description": "Current password does not match"
+          },
+          "401": {
+            "description": "Unauthorized"
           }
         }
       }

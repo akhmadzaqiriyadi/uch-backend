@@ -84,7 +84,12 @@ func main() {
 	}
 
 	if err := userRepo.Create(ctx, adminUser); err != nil {
-		logger.Warn("Admin user already exists in database (skipped creation)", slog.String("email", adminUser.Email))
+		logger.Warn("Admin user already exists in database, ensuring credentials", slog.String("email", adminUser.Email))
+		if existing, getErr := userRepo.GetByEmail(ctx, adminUser.Email); getErr == nil {
+			_ = userRepo.UpdatePassword(ctx, existing.ID, string(hashedPassword))
+			_ = userRepo.UpdateRole(ctx, existing.ID, "admin")
+			_ = userRepo.SetEmailVerified(ctx, existing.ID)
+		}
 	} else {
 		if targetEnv == "dev" {
 			logger.Info("👑 [DEV] Admin user seeded successfully",
@@ -98,6 +103,56 @@ func main() {
 				slog.String("role", adminUser.Role),
 			)
 		}
+	}
+
+	// 1b. Seed Demo Civitas Mahasiswa & Dosen Accounts
+	userPassHash, _ := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.DefaultCost)
+	mahasiswaUser := &domain.User{
+		ID:          uuid.New(),
+		Name:        "Akhmad Zaqi Riyadi",
+		Email:       "zaqi@students.uty.ac.id",
+		Password:    string(userPassHash),
+		Role:        "mahasiswa",
+		IDNumber:    "5210411234",
+		Affiliation: "Informatika",
+		IsVerified:  true,
+		VerifiedAt:  &now,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	if err := userRepo.Create(ctx, mahasiswaUser); err != nil {
+		logger.Warn("Mahasiswa demo user already exists, ensuring credentials", slog.String("email", mahasiswaUser.Email))
+		if existing, getErr := userRepo.GetByEmail(ctx, mahasiswaUser.Email); getErr == nil {
+			_ = userRepo.UpdatePassword(ctx, existing.ID, string(userPassHash))
+			_ = userRepo.UpdateRole(ctx, existing.ID, "mahasiswa")
+			_ = userRepo.SetEmailVerified(ctx, existing.ID)
+		}
+	} else {
+		logger.Info("🎓 [DEV] Mahasiswa demo user seeded (Email: zaqi@students.uty.ac.id, Pass: Password123!)")
+	}
+
+	dosenUser := &domain.User{
+		ID:          uuid.New(),
+		Name:        "Dr. Bambang Sutrisno, M.Kom.",
+		Email:       "bambang@uty.ac.id",
+		Password:    string(userPassHash),
+		Role:        "dosen",
+		IDNumber:    "0514088201",
+		Affiliation: "Fakultas Sains & Teknologi",
+		IsVerified:  true,
+		VerifiedAt:  &now,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	if err := userRepo.Create(ctx, dosenUser); err != nil {
+		logger.Warn("Dosen demo user already exists, ensuring credentials", slog.String("email", dosenUser.Email))
+		if existing, getErr := userRepo.GetByEmail(ctx, dosenUser.Email); getErr == nil {
+			_ = userRepo.UpdatePassword(ctx, existing.ID, string(userPassHash))
+			_ = userRepo.UpdateRole(ctx, existing.ID, "dosen")
+			_ = userRepo.SetEmailVerified(ctx, existing.ID)
+		}
+	} else {
+		logger.Info("👨‍🏫 [DEV] Dosen demo user seeded (Email: bambang@uty.ac.id, Pass: Password123!)")
 	}
 
 	// 2. Production Security Gate: Prevent seeding fake data into production

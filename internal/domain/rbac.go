@@ -31,4 +31,7 @@ type RBACRepository interface {
 	ListPermissions(ctx context.Context) ([]Permission, error)
 	AssignPermissionToRole(ctx context.Context, roleID, permissionID string) error
 	RevokePermissionFromRole(ctx context.Context, roleID, permissionID string) error
+	CreateRole(ctx context.Context, id, name, description string) error
+	DeleteRole(ctx context.Context, id string) error
 }
+

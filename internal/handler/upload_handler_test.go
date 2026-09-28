@@ -2,6 +2,8 @@ package handler
 
 import (
 	"bytes"
+	"context"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -30,6 +32,10 @@ func (m *mockStorage) SaveFile(header *multipart.FileHeader) (*storage.FileInfo,
 	}, nil
 }
 
+func (m *mockStorage) SaveFileWithFolder(header *multipart.FileHeader, folder string) (*storage.FileInfo, error) {
+	return m.SaveFile(header)
+}
+
 func (m *mockStorage) DeleteFile(filename string) error {
 	if m.deleteFunc != nil {
 		return m.deleteFunc(filename)
@@ -42,6 +48,10 @@ func (m *mockStorage) GetURL(filename string) string {
 		return m.getURLFunc(filename)
 	}
 	return "http://localhost:8080/uploads/" + filename
+}
+
+func (m *mockStorage) GetFile(ctx context.Context, key string) (io.ReadCloser, string, error) {
+	return io.NopCloser(bytes.NewReader([]byte("test file content"))), "image/png", nil
 }
 
 func TestUploadHandler_UploadFile(t *testing.T) {

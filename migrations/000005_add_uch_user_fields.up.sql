@@ -1,0 +1,4 @@
+ALTER TABLE users ADD COLUMN IF NOT EXISTS id_number VARCHAR(50);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS affiliation VARCHAR(150);
+
+CREATE INDEX IF NOT EXISTS idx_users_id_number ON users(id_number);

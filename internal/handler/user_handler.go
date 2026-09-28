@@ -249,6 +249,36 @@ func (h *UserHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 	response.OK(w, "Profile updated successfully", user)
 }
 
+func (h *UserHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
+	userID, err := middleware.GetUserID(r.Context())
+	if err != nil {
+		response.Unauthorized(w, "Unauthorized")
+		return
+	}
+
+	var req domain.ChangePasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.BadRequest(w, "Invalid JSON request payload", err.Error())
+		return
+	}
+
+	if errs := validator.ValidateStruct(req); len(errs) > 0 {
+		response.UnprocessableEntity(w, "Validation failed on request body", errs)
+		return
+	}
+
+	if err := h.userService.ChangePassword(r.Context(), userID, req); err != nil {
+		if errors.Is(err, domain.ErrWrongPassword) {
+			response.BadRequest(w, "Kata sandi lama tidak sesuai", nil)
+			return
+		}
+		response.InternalServerError(w, "Failed to change password", err.Error())
+		return
+	}
+
+	response.OK(w, "Password changed successfully", nil)
+}
+
 func (h *UserHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	params := pagination.FromRequest(r)
 	search := r.URL.Query().Get("search")
@@ -312,4 +342,36 @@ func (h *UserHandler) UpdateUserRole(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.OK(w, "User role updated successfully", user)
+}
+
+func (h *UserHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	targetID, err := uuid.Parse(idStr)
+	if err != nil {
+		response.BadRequest(w, "Invalid user ID UUID format", nil)
+		return
+	}
+
+	var req domain.AdminUpdateUserRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.BadRequest(w, "Invalid JSON request payload", err.Error())
+		return
+	}
+
+	if errs := validator.ValidateStruct(req); len(errs) > 0 {
+		response.UnprocessableEntity(w, "Validation failed on request body", errs)
+		return
+	}
+
+	user, err := h.userService.UpdateUser(r.Context(), targetID, req)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			response.NotFound(w, "User not found")
+			return
+		}
+		response.InternalServerError(w, "Failed to update user", err.Error())
+		return
+	}
+
+	response.OK(w, "User updated successfully", user)
 }

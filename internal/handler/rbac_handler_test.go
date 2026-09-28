@@ -70,6 +70,14 @@ func (m *mockRBACRepo) RevokePermissionFromRole(ctx context.Context, roleID, per
 	return nil
 }
 
+func (m *mockRBACRepo) CreateRole(ctx context.Context, id, name, description string) error {
+	return nil
+}
+
+func (m *mockRBACRepo) DeleteRole(ctx context.Context, id string) error {
+	return nil
+}
+
 func TestRBACHandler(t *testing.T) {
 	t.Run("ListRoles_Success", func(t *testing.T) {
 		repo := &mockRBACRepo{}

@@ -60,6 +60,7 @@ type StorageConfig struct {
 	S3AccessKey string
 	S3SecretKey string
 	S3UseSSL    bool
+	S3SSLVerify bool
 	S3PublicURL string
 }
 
@@ -145,6 +146,7 @@ func Load() *Config {
 			S3AccessKey: getEnv("S3_ACCESS_KEY", ""),
 			S3SecretKey: getEnv("S3_SECRET_KEY", ""),
 			S3UseSSL:    getEnvBool("S3_USE_SSL", true),
+			S3SSLVerify: getEnvBool("S3_SSL_VERIFY", false),
 			S3PublicURL: getEnv("S3_PUBLIC_URL", ""),
 		},
 		CORS: CORSConfig{

@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -31,8 +32,10 @@ type FileInfo struct {
 // Storage is the abstraction for file storage backends (Local, S3, MinIO, GCS)
 type Storage interface {
 	SaveFile(header *multipart.FileHeader) (*FileInfo, error)
+	SaveFileWithFolder(header *multipart.FileHeader, folder string) (*FileInfo, error)
 	DeleteFile(filename string) error
 	GetURL(filename string) string
+	GetFile(ctx context.Context, key string) (io.ReadCloser, string, error)
 }
 
 // LocalStorage implements Storage for the local file system
@@ -65,6 +68,10 @@ func NewLocalStorage(baseDir, baseURL string, maxSizeBytes int64) *LocalStorage 
 }
 
 func (s *LocalStorage) SaveFile(header *multipart.FileHeader) (*FileInfo, error) {
+	return s.SaveFileWithFolder(header, "")
+}
+
+func (s *LocalStorage) SaveFileWithFolder(header *multipart.FileHeader, folder string) (*FileInfo, error) {
 	if header.Size > s.maxSize {
 		return nil, ErrFileTooLarge
 	}
@@ -104,8 +111,16 @@ func (s *LocalStorage) SaveFile(header *multipart.FileHeader) (*FileInfo, error)
 	if ext == "" {
 		ext = ".bin"
 	}
-	uniqueName := fmt.Sprintf("%s%s", uuid.New().String(), strings.ToLower(ext))
-	targetPath := filepath.Join(s.baseDir, uniqueName)
+	keyName := fmt.Sprintf("%s%s", uuid.New().String(), strings.ToLower(ext))
+	targetDir := s.baseDir
+	if folder != "" {
+		cleanFolder := strings.Trim(folder, "/")
+		targetDir = filepath.Join(s.baseDir, cleanFolder)
+		_ = os.MkdirAll(targetDir, 0755)
+		keyName = fmt.Sprintf("%s/%s", cleanFolder, keyName)
+	}
+
+	targetPath := filepath.Join(s.baseDir, filepath.FromSlash(keyName))
 
 	dst, err := os.Create(targetPath)
 	if err != nil {
@@ -117,14 +132,15 @@ func (s *LocalStorage) SaveFile(header *multipart.FileHeader) (*FileInfo, error)
 
 	written, err := io.Copy(dst, file)
 	if err != nil {
+		_ = os.Remove(targetPath)
 		return nil, fmt.Errorf("failed to save file: %w", err)
 	}
 
 	return &FileInfo{
 		OriginalName: header.Filename,
-		FileName:     uniqueName,
+		FileName:     keyName,
 		FilePath:     targetPath,
-		URL:          s.GetURL(uniqueName),
+		URL:          s.GetURL(keyName),
 		Size:         written,
 		MimeType:     mimeType,
 	}, nil
@@ -132,8 +148,9 @@ func (s *LocalStorage) SaveFile(header *multipart.FileHeader) (*FileInfo, error)
 
 func (s *LocalStorage) DeleteFile(filename string) error {
 	// Prevent directory traversal
-	cleanName := filepath.Base(filename)
-	targetPath := filepath.Join(s.baseDir, cleanName)
+	cleanName := filepath.Clean(filename)
+	cleanName = strings.TrimPrefix(cleanName, "/")
+	targetPath := filepath.Join(s.baseDir, filepath.FromSlash(cleanName))
 
 	if _, err := os.Stat(targetPath); os.IsNotExist(err) {
 		return ErrFileNotFound
@@ -143,6 +160,26 @@ func (s *LocalStorage) DeleteFile(filename string) error {
 }
 
 func (s *LocalStorage) GetURL(filename string) string {
-	cleanName := filepath.Base(filename)
+	cleanName := strings.TrimPrefix(filepath.ToSlash(filename), "/")
 	return fmt.Sprintf("%s/%s", strings.TrimRight(s.baseURL, "/"), cleanName)
+}
+
+func (s *LocalStorage) GetFile(ctx context.Context, key string) (io.ReadCloser, string, error) {
+	cleanPath := filepath.Clean(key)
+	cleanPath = strings.TrimPrefix(cleanPath, "/")
+	targetPath := filepath.Join(s.baseDir, filepath.FromSlash(cleanPath))
+
+	f, err := os.Open(targetPath)
+	if err != nil {
+		return nil, "", ErrFileNotFound
+	}
+
+	buf := make([]byte, 512)
+	n, _ := f.Read(buf)
+	_, _ = f.Seek(0, io.SeekStart)
+	mime := http.DetectContentType(buf[:n])
+	if idx := strings.Index(mime, ";"); idx != -1 {
+		mime = strings.TrimSpace(mime[:idx])
+	}
+	return f, mime, nil
 }

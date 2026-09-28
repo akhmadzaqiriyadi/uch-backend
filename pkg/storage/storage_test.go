@@ -114,6 +114,11 @@ func (m *MockS3Client) DeleteObject(ctx context.Context, params *s3.DeleteObject
 	return &s3.DeleteObjectOutput{}, args.Error(0)
 }
 
+func (m *MockS3Client) GetObject(ctx context.Context, params *s3.GetObjectInput, optFns ...func(*s3.Options)) (*s3.GetObjectOutput, error) {
+	args := m.Called(ctx, params)
+	return &s3.GetObjectOutput{}, args.Error(0)
+}
+
 func TestS3Storage_SaveFile_Success(t *testing.T) {
 	mockClient := new(MockS3Client)
 	mockClient.On("PutObject", mock.Anything, mock.AnythingOfType("*s3.PutObjectInput")).Return(nil)

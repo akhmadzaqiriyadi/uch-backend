@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -23,6 +24,7 @@ import (
 type S3ClientAPI interface {
 	PutObject(ctx context.Context, params *s3.PutObjectInput, optFns ...func(*s3.Options)) (*s3.PutObjectOutput, error)
 	DeleteObject(ctx context.Context, params *s3.DeleteObjectInput, optFns ...func(*s3.Options)) (*s3.DeleteObjectOutput, error)
+	GetObject(ctx context.Context, params *s3.GetObjectInput, optFns ...func(*s3.Options)) (*s3.GetObjectOutput, error)
 }
 
 // S3Storage implements Storage for AWS S3, Cloudflare R2, MinIO, and DigitalOcean Spaces
@@ -48,6 +50,15 @@ func NewS3Storage(cfg *config.Config) (*S3Storage, error) {
 			credentials.NewStaticCredentialsProvider(cfg.Storage.S3AccessKey, cfg.Storage.S3SecretKey, ""),
 		))
 	}
+
+	// Custom HTTP client for self-hosted MinIO (InsecureSkipVerify when S3SSLVerify is false)
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: !cfg.Storage.S3SSLVerify,
+		},
+	}
+	httpClient := &http.Client{Transport: tr}
+	optFns = append(optFns, awsConfig.WithHTTPClient(httpClient))
 
 	awsCfg, err := awsConfig.LoadDefaultConfig(context.Background(), optFns...)
 	if err != nil {
@@ -102,6 +113,10 @@ func NewS3StorageWithClient(client S3ClientAPI, bucket, region, publicURL string
 }
 
 func (s *S3Storage) SaveFile(header *multipart.FileHeader) (*FileInfo, error) {
+	return s.SaveFileWithFolder(header, "")
+}
+
+func (s *S3Storage) SaveFileWithFolder(header *multipart.FileHeader, folder string) (*FileInfo, error) {
 	if header.Size > s.maxSize {
 		return nil, ErrFileTooLarge
 	}
@@ -139,6 +154,10 @@ func (s *S3Storage) SaveFile(header *multipart.FileHeader) (*FileInfo, error) {
 		ext = ".bin"
 	}
 	uniqueKey := fmt.Sprintf("%s%s", uuid.New().String(), strings.ToLower(ext))
+	if folder != "" {
+		cleanFolder := strings.Trim(folder, "/")
+		uniqueKey = fmt.Sprintf("%s/%s", cleanFolder, uniqueKey)
+	}
 
 	ctx := context.Background()
 	_, err = s.client.PutObject(ctx, &s3.PutObjectInput{
@@ -163,7 +182,7 @@ func (s *S3Storage) SaveFile(header *multipart.FileHeader) (*FileInfo, error) {
 }
 
 func (s *S3Storage) DeleteFile(filename string) error {
-	cleanName := filepath.Base(filename)
+	cleanName := strings.TrimPrefix(filename, "/")
 	ctx := context.Background()
 
 	_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
@@ -177,9 +196,30 @@ func (s *S3Storage) DeleteFile(filename string) error {
 }
 
 func (s *S3Storage) GetURL(filename string) string {
-	cleanName := filepath.Base(filename)
+	cleanName := strings.TrimPrefix(filename, "/")
 	if s.publicURL != "" {
-		return fmt.Sprintf("%s/%s", s.publicURL, cleanName)
+		if strings.Contains(s.publicURL, "s3.") || strings.Contains(s.publicURL, "localhost") {
+			return fmt.Sprintf("%s/%s/%s", strings.TrimRight(s.publicURL, "/"), s.bucket, cleanName)
+		}
+		return fmt.Sprintf("%s/%s", strings.TrimRight(s.publicURL, "/"), cleanName)
 	}
 	return fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", s.bucket, s.region, cleanName)
+}
+
+func (s *S3Storage) GetFile(ctx context.Context, key string) (io.ReadCloser, string, error) {
+	cleanKey := strings.TrimPrefix(key, "/")
+	out, err := s.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(cleanKey),
+	})
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get object from S3: %w", err)
+	}
+
+	contentType := "application/octet-stream"
+	if out.ContentType != nil && *out.ContentType != "" {
+		contentType = *out.ContentType
+	}
+
+	return out.Body, contentType, nil
 }
