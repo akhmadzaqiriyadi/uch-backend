@@ -3,8 +3,10 @@ package webpush
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -120,8 +122,14 @@ func (s *Service) dispatchPush(sub domain.PushSubscription, payload []byte) {
 		},
 	}
 
+	// Ensure subscriber does not contain double mailto:
+	subscriber := strings.TrimSpace(s.cfg.VAPIDSubject)
+	if strings.HasPrefix(subscriber, "mailto:") {
+		subscriber = strings.TrimPrefix(subscriber, "mailto:")
+	}
+
 	resp, err := webpush.SendNotification(payload, wpSub, &webpush.Options{
-		Subscriber:      s.cfg.VAPIDSubject,
+		Subscriber:      subscriber,
 		VAPIDPublicKey:  s.cfg.VAPIDPublicKey,
 		VAPIDPrivateKey: s.cfg.VAPIDPrivateKey,
 		TTL:             86400, // 24 hours
@@ -137,23 +145,28 @@ func (s *Service) dispatchPush(sub domain.PushSubscription, payload []byte) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone {
-		slog.Info("Subscription expired or unregistered, removing from database",
-			slog.String("endpoint", sub.Endpoint),
-			slog.Int("status_code", resp.StatusCode),
-		)
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = s.repo.DeleteByEndpoint(ctx, sub.Endpoint)
-	} else if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	respBody := strings.TrimSpace(string(bodyBytes))
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		slog.Info("Web Push notification delivered successfully",
 			slog.String("user_id", sub.UserID.String()),
 			slog.Int("status_code", resp.StatusCode),
 		)
+	} else if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone {
+		slog.Info("Subscription expired or unregistered, removing from database",
+			slog.String("endpoint", sub.Endpoint),
+			slog.Int("status_code", resp.StatusCode),
+			slog.String("response", respBody),
+		)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = s.repo.DeleteByEndpoint(ctx, sub.Endpoint)
 	} else {
 		slog.Warn("Web Push returned non-2xx status",
 			slog.String("endpoint", sub.Endpoint),
 			slog.Int("status_code", resp.StatusCode),
+			slog.String("response", respBody),
 		)
 	}
 }
