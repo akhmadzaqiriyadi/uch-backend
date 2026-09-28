@@ -130,6 +130,16 @@ func (s *BookingService) CreateBooking(ctx context.Context, userID uuid.UUID, re
 	})
 
 	if s.notifier != nil {
+		s.notifier.SendToUser(userID, "booking:created", map[string]any{
+			"id":             booking.ID,
+			"room_name":      booking.RoomName,
+			"applicant_name": booking.ApplicantName,
+			"booking_date":   booking.BookingDate,
+			"start_time":     booking.StartTime,
+			"end_time":       booking.EndTime,
+			"message":        fmt.Sprintf("Permohonan reservasi %s (ID: %s) berhasil diajukan dan sedang menunggu verifikasi.", booking.RoomName, booking.ID),
+		})
+
 		s.notifier.SendToRole("admin", "booking:created", map[string]any{
 			"id":             booking.ID,
 			"room_name":      booking.RoomName,

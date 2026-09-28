@@ -56,8 +56,9 @@ func (h *Hub) Run() {
 		case client := <-h.register:
 			h.mu.Lock()
 			h.clients[client] = true
+			total := len(h.clients)
 			h.mu.Unlock()
-			slog.Debug("Realtime client connected", slog.String("user_id", client.UserID.String()), slog.String("role", client.Role))
+			slog.Info("Realtime client connected", slog.String("user_id", client.UserID.String()), slog.String("role", client.Role), slog.Int("total_clients", total))
 
 		case client := <-h.unregister:
 			h.mu.Lock()
@@ -65,8 +66,9 @@ func (h *Hub) Run() {
 				delete(h.clients, client)
 				close(client.Send)
 			}
+			total := len(h.clients)
 			h.mu.Unlock()
-			slog.Debug("Realtime client disconnected", slog.String("user_id", client.UserID.String()))
+			slog.Info("Realtime client disconnected", slog.String("user_id", client.UserID.String()), slog.Int("total_clients", total))
 
 		case message := <-h.broadcast:
 			h.mu.RLock()
@@ -93,6 +95,12 @@ func (h *Hub) Broadcast(event string, payload any) {
 	if err != nil {
 		return
 	}
+
+	h.mu.RLock()
+	total := len(h.clients)
+	h.mu.RUnlock()
+
+	slog.Info("Realtime Broadcast event", slog.String("event", event), slog.Int("total_clients", total))
 	h.broadcast <- bytes
 }
 
@@ -110,14 +118,17 @@ func (h *Hub) SendToUser(userID uuid.UUID, event string, payload any) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
+	matched := 0
 	for client := range h.clients {
 		if client.UserID == userID {
 			select {
 			case client.Send <- bytes:
+				matched++
 			default:
 			}
 		}
 	}
+	slog.Info("Realtime SendToUser", slog.String("user_id", userID.String()), slog.String("event", event), slog.Int("matched_clients", matched), slog.Int("total_clients", len(h.clients)))
 }
 
 func (h *Hub) SendToRole(role string, event string, payload any) {
@@ -134,14 +145,17 @@ func (h *Hub) SendToRole(role string, event string, payload any) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
+	matched := 0
 	for client := range h.clients {
 		if client.Role == role || client.Role == "admin" {
 			select {
 			case client.Send <- bytes:
+				matched++
 			default:
 			}
 		}
 	}
+	slog.Info("Realtime SendToRole", slog.String("role", role), slog.String("event", event), slog.Int("matched_clients", matched), slog.Int("total_clients", len(h.clients)))
 }
 
 func (c *Client) ReadPump() {
@@ -181,20 +195,7 @@ func (c *Client) WritePump() {
 				return
 			}
 
-			w, err := c.Conn.NextWriter(websocket.TextMessage)
-			if err != nil {
-				return
-			}
-			_, _ = w.Write(message)
-
-			// Drain queued messages
-			n := len(c.Send)
-			for i := 0; i < n; i++ {
-				_, _ = w.Write([]byte{'\n'})
-				_, _ = w.Write(<-c.Send)
-			}
-
-			if err := w.Close(); err != nil {
+			if err := c.Conn.WriteMessage(websocket.TextMessage, message); err != nil {
 				return
 			}
 

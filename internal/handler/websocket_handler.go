@@ -2,6 +2,7 @@ package handler
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -36,6 +37,7 @@ func (h *WebSocketHandler) HandleWS(w http.ResponseWriter, r *http.Request) {
 
 	var userID uuid.UUID
 	role := "guest"
+	authSuccess := false
 
 	if tokenStr != "" {
 		token, err := jwt.ParseWithClaims(tokenStr, &service.JWTClaims{}, func(t *jwt.Token) (any, error) {
@@ -49,13 +51,24 @@ func (h *WebSocketHandler) HandleWS(w http.ResponseWriter, r *http.Request) {
 			if claims, ok := token.Claims.(*service.JWTClaims); ok {
 				userID = claims.UserID
 				role = claims.Role
+				authSuccess = true
 			}
+		} else {
+			slog.Warn("WebSocket token invalid or expired", slog.Any("error", err), slog.String("remote_addr", r.RemoteAddr))
 		}
 	}
 
 	if userID == uuid.Nil {
 		userID = uuid.New()
 	}
+
+	slog.Info("WebSocket upgrading connection",
+		slog.String("user_id", userID.String()),
+		slog.String("role", role),
+		slog.Bool("authenticated", authSuccess),
+		slog.String("remote_addr", r.RemoteAddr),
+		slog.String("user_agent", r.UserAgent()),
+	)
 
 	_ = realtime.ServeWs(h.hub, w, r, userID, role)
 }
