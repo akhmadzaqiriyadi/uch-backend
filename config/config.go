@@ -19,6 +19,13 @@ type Config struct {
 	Storage  StorageConfig
 	CORS     CORSConfig
 	Seed     SeedConfig
+	WebPush  WebPushConfig
+}
+
+type WebPushConfig struct {
+	VAPIDPublicKey  string
+	VAPIDPrivateKey string
+	VAPIDSubject    string
 }
 
 type CORSConfig struct {
@@ -155,6 +162,11 @@ func Load() *Config {
 		Seed: SeedConfig{
 			AdminEmail:    getEnv("INITIAL_ADMIN_EMAIL", "admin@gozaq.com"),
 			AdminPassword: getEnv("INITIAL_ADMIN_PASSWORD", "Admin123!"),
+		},
+		WebPush: WebPushConfig{
+			VAPIDPublicKey:  getEnv("VAPID_PUBLIC_KEY", "BA5uIyOgWyI97myma6KMz8D4QFeK1LKy-9VUKujvJHtlPRq6dIShnxVkdE6rAKL62HhFhUatHs7k-GTvfwgMgu0"),
+			VAPIDPrivateKey: getEnv("VAPID_PRIVATE_KEY", "HgrQ9tUPHLoZOcVsJxLXV1urB8YTJAEAkGsuOpqo92s"),
+			VAPIDSubject:    getEnv("VAPID_SUBJECT", "mailto:admin@kreanovasi.uty.ac.id"),
 		},
 	}
 }

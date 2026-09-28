@@ -27,6 +27,7 @@ func NewRouter(
 	roomHandler *RoomHandler,
 	bookingHandler *BookingHandler,
 	wsHandler *WebSocketHandler,
+	pushHandler *PushHandler,
 ) http.Handler {
 	r := chi.NewRouter()
 
@@ -111,6 +112,9 @@ func NewRouter(
 		r.Get("/rooms/{id}", roomHandler.GetRoom)
 		r.Get("/rooms/{id}/occupied-slots", bookingHandler.GetOccupiedSlots)
 
+		// Public VAPID Key for Web Push Notifications
+		r.Get("/notifications/vapid-key", pushHandler.GetVAPIDPublicKey)
+
 		// Protected Routes (Requires valid JWT Access Token)
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.Auth(cfg))
@@ -125,6 +129,10 @@ func NewRouter(
 			r.Get("/my-bookings", bookingHandler.ListMyBookings)
 			r.Post("/bookings/{id}/cancel", bookingHandler.CancelBooking)
 			r.Post("/bookings/self-checkin", bookingHandler.SelfCheckIn)
+
+			// Web Push Notifications Subscription
+			r.Post("/notifications/subscribe", pushHandler.Subscribe)
+			r.Post("/notifications/unsubscribe", pushHandler.Unsubscribe)
 
 			// Admin & Manager Bookings Management
 			r.With(middleware.RequireAnyPermission("bookings:read", "bookings:manage")).
