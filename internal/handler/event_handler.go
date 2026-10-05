@@ -254,6 +254,9 @@ func (h *EventHandler) DeleteEvent(w http.ResponseWriter, r *http.Request) {
 func (h *EventHandler) ListRegistrations(w http.ResponseWriter, r *http.Request) {
 	eventID := chi.URLParam(r, "id")
 	q := r.URL.Query()
+	if eventID == "" {
+		eventID = q.Get("event_id")
+	}
 
 	page, _ := strconv.Atoi(q.Get("page"))
 	limit, _ := strconv.Atoi(q.Get("limit"))

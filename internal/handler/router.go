@@ -147,6 +147,8 @@ func NewRouter(
 
 			// Admin & Manager Events Management
 			r.With(middleware.RequireAnyPermission("events:read", "events:manage")).
+				Get("/events/registrations", eventHandler.ListRegistrations)
+			r.With(middleware.RequireAnyPermission("events:read", "events:manage")).
 				Get("/events/{id}/registrations", eventHandler.ListRegistrations)
 			r.With(middleware.RequireAnyPermission("events:read", "events:manage")).
 				Get("/events/{id}/export", eventHandler.ExportRegistrationsCSV)
