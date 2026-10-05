@@ -26,6 +26,7 @@ func NewRouter(
 	auditHandler *AuditHandler,
 	roomHandler *RoomHandler,
 	bookingHandler *BookingHandler,
+	eventHandler *EventHandler,
 	wsHandler *WebSocketHandler,
 	pushHandler *PushHandler,
 ) http.Handler {
@@ -112,6 +113,10 @@ func NewRouter(
 		r.Get("/rooms/{id}", roomHandler.GetRoom)
 		r.Get("/rooms/{id}/occupied-slots", bookingHandler.GetOccupiedSlots)
 
+		// Public Events catalog
+		r.Get("/events", eventHandler.ListEvents)
+		r.Get("/events/{id}", eventHandler.GetEvent)
+
 		// Public VAPID Key for Web Push Notifications
 		r.Get("/notifications/vapid-key", pushHandler.GetVAPIDPublicKey)
 
@@ -130,9 +135,31 @@ func NewRouter(
 			r.Post("/bookings/{id}/cancel", bookingHandler.CancelBooking)
 			r.Post("/bookings/self-checkin", bookingHandler.SelfCheckIn)
 
+			// User Event Registrations (Wajib Login & Terproteksi)
+			r.Post("/events/{id}/register", eventHandler.Register)
+			r.Get("/my-event-registrations", eventHandler.GetMyRegistrations)
+			r.Get("/events/{id}/my-registration", eventHandler.GetMyRegistrationForEvent)
+			r.Post("/events/registrations/{id}/revise", eventHandler.ReviseRegistration)
+
 			// Web Push Notifications Subscription
 			r.Post("/notifications/subscribe", pushHandler.Subscribe)
 			r.Post("/notifications/unsubscribe", pushHandler.Unsubscribe)
+
+			// Admin & Manager Events Management
+			r.With(middleware.RequireAnyPermission("events:read", "events:manage")).
+				Get("/events/{id}/registrations", eventHandler.ListRegistrations)
+			r.With(middleware.RequireAnyPermission("events:read", "events:manage")).
+				Get("/events/{id}/export", eventHandler.ExportRegistrationsCSV)
+			r.With(middleware.RequirePermission("events:manage")).
+				Patch("/events/registrations/{id}/status", eventHandler.UpdateRegistrationStatus)
+			r.With(middleware.RequirePermission("events:manage")).
+				Post("/events/checkin", eventHandler.CheckIn)
+			r.With(middleware.RequirePermission("events:create")).
+				Post("/events", eventHandler.CreateEvent)
+			r.With(middleware.RequirePermission("events:update")).
+				Put("/events/{id}", eventHandler.UpdateEvent)
+			r.With(middleware.RequirePermission("events:delete")).
+				Delete("/events/{id}", eventHandler.DeleteEvent)
 
 			// Admin & Manager Bookings Management
 			r.With(middleware.RequireAnyPermission("bookings:read", "bookings:manage")).

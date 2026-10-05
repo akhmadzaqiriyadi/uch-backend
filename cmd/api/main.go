@@ -111,6 +111,7 @@ func main() {
 	auditRepo := postgres.NewAuditRepository(dbPool)
 	roomRepo := postgres.NewRoomRepository(dbPool)
 	bookingRepo := postgres.NewBookingRepository(dbPool)
+	eventRepo := postgres.NewEventRepository(dbPool)
 	pushRepo := postgres.NewPushSubscriptionRepository(dbPool)
 
 	// Realtime Notification WebSocket Hub & WebPush Service
@@ -124,6 +125,8 @@ func main() {
 	roomService := service.NewRoomService(roomRepo, auditRepo)
 	bookingService := service.NewBookingService(bookingRepo, roomRepo, userRepo, auditRepo)
 	bookingService.SetNotifier(compositeNotifier)
+	eventService := service.NewEventService(eventRepo, auditRepo)
+	eventService.SetNotifier(compositeNotifier)
 
 	userHandler := handler.NewUserHandler(userService)
 	docsHandler := handler.NewDocsHandler()
@@ -133,6 +136,7 @@ func main() {
 	auditHandler := handler.NewAuditHandler(auditRepo)
 	roomHandler := handler.NewRoomHandler(roomService)
 	bookingHandler := handler.NewBookingHandler(bookingService)
+	eventHandler := handler.NewEventHandler(eventService)
 	wsHandler := handler.NewWebSocketHandler(realtimeHub, cfg)
 	pushHandler := handler.NewPushHandler(pushService)
 
@@ -148,6 +152,7 @@ func main() {
 		auditHandler,
 		roomHandler,
 		bookingHandler,
+		eventHandler,
 		wsHandler,
 		pushHandler,
 	)
